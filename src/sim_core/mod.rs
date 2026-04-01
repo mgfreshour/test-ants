@@ -3,6 +3,8 @@
 //! This module is the home for deterministic simulation code that can be unit
 //! tested without Bevy ECS world setup, rendering components, or UI concerns.
 
+pub mod ant_logic;
+
 /// Scale frame delta seconds by a simulation speed multiplier.
 ///
 /// This helper is intentionally pure and side-effect free.

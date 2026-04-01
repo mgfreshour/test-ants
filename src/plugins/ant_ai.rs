@@ -24,6 +24,7 @@ use crate::resources::nest::NestGrid;
 use crate::resources::pheromone::{ColonyPheromones, PheromoneConfig};
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 use crate::resources::spatial_grid::SpatialGrid;
+use crate::sim_core::ant_logic;
 use crate::plugins::nest::nest_grid_to_world;
 
 pub struct AntAiPlugin;
@@ -125,19 +126,17 @@ fn hunger_tick(
     let dt = time.delta_secs() * clock.speed.multiplier();
 
     for (mut ant, mut health, carried) in &mut query {
-        ant.hunger = (ant.hunger + HUNGER_RATE * dt).min(1.0);
-
-        // Self-feed: if hungry and carrying food, take a bite (keeps the food).
-        if ant.hunger > 0.5 {
-            if carried.is_some() {
-                ant.hunger = (ant.hunger - 0.4).max(0.0);
-            }
-        }
-
-        // Starvation damage
-        if ant.hunger >= 1.0 {
-            health.current -= STARVATION_DPS * dt;
-        }
+        let (next_hunger, hp_loss) = ant_logic::hunger_tick_step(
+            ant.hunger,
+            dt,
+            HUNGER_RATE,
+            carried.map(|c| c.food_amount),
+            0.5,
+            0.4,
+            STARVATION_DPS,
+        );
+        ant.hunger = next_hunger;
+        health.current -= hp_loss;
     }
 }
 
@@ -225,9 +224,7 @@ fn fix_orphaned_returners(
 /// Stable per-ant trail-follow decision. Returns true if this ant should follow
 /// trails during the current epoch, false if it should scout instead.
 fn should_follow_trail(entity: Entity, elapsed: f32) -> bool {
-    let epoch = (elapsed * TRAIL_EPOCH_RATE) as u32;
-    let hash = entity.index().wrapping_mul(2654435761) ^ epoch;
-    (hash % 100) < TRAIL_FOLLOW_CHANCE
+    ant_logic::should_follow_trail(entity.index(), elapsed, TRAIL_EPOCH_RATE, TRAIL_FOLLOW_CHANCE)
 }
 
 /// Foraging ants: follow FOOD pheromone gradient or random walk, biased away from HOME.
@@ -588,12 +585,14 @@ fn ant_movement(
         if map_id.0 != registry.surface {
             continue;
         }
-        let hunger_factor = if ant.hunger > HUNGER_SLOW_THRESHOLD {
-            HUNGER_SLOW_FACTOR
-        } else {
-            1.0
-        };
-        let velocity = movement.direction * movement.speed * hunger_factor * dt;
+        let velocity = ant_logic::surface_velocity(
+            movement.direction,
+            movement.speed,
+            ant.hunger,
+            dt,
+            HUNGER_SLOW_THRESHOLD,
+            HUNGER_SLOW_FACTOR,
+        );
         transform.translation.x += velocity.x;
         transform.translation.y += velocity.y;
     }
@@ -633,23 +632,15 @@ fn ant_boundary_bounce(
         if map_id.0 != registry.surface {
             continue;
         }
-        let pos = &mut transform.translation;
-
-        if pos.x <= min_x {
-            pos.x = min_x;
-            movement.direction.x = movement.direction.x.abs();
-        } else if pos.x >= max_x {
-            pos.x = max_x;
-            movement.direction.x = -movement.direction.x.abs();
-        }
-
-        if pos.y <= min_y {
-            pos.y = min_y;
-            movement.direction.y = movement.direction.y.abs();
-        } else if pos.y >= max_y {
-            pos.y = max_y;
-            movement.direction.y = -movement.direction.y.abs();
-        }
+        let (next_pos, next_dir) = ant_logic::apply_boundary_bounce(
+            transform.translation.truncate(),
+            movement.direction,
+            Vec2::new(min_x, min_y),
+            Vec2::new(max_x, max_y),
+        );
+        transform.translation.x = next_pos.x;
+        transform.translation.y = next_pos.y;
+        movement.direction = next_dir;
     }
 }
 

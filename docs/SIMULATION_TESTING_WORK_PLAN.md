@@ -32,7 +32,7 @@ Do not test:
        Why: prevents accidental UI test scope creep and aligns contributors.
 2. [x] **W2 (P0/L) - REFACTOR** Create `sim_core` module for pure simulation functions (no `Commands`, `Sprite`, `Text2d`).  
        Why: establishes testable seams for logic currently embedded in ECS systems.
-3. [ ] **W3 (P0/XL) - REFACTOR** Extract ant decision logic from `ant_ai` into pure functions.  
+3. [x] **W3 (P0/XL) - REFACTOR** Extract ant decision logic from `ant_ai` into pure functions.  
        Why: enables deterministic tests for foraging/returning/transition behaviors.
 4. [ ] **W4 (P0/L) - REFACTOR** Extract nest utility scoring from `nest_ai` into pure scoring API.  
        Why: makes task-selection behavior testable with table-driven tests.
