@@ -86,3 +86,25 @@ impl Default for SimConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::SimSpeed;
+
+    #[test]
+    fn sim_speed_multipliers_are_expected() {
+        assert_eq!(SimSpeed::Paused.multiplier(), 0.0);
+        assert_eq!(SimSpeed::Normal.multiplier(), 1.0);
+        assert_eq!(SimSpeed::Fast.multiplier(), 2.0);
+        assert_eq!(SimSpeed::VeryFast.multiplier(), 4.0);
+        assert_eq!(SimSpeed::Ultra.multiplier(), 8.0);
+    }
+
+    #[test]
+    fn cycle_next_skips_paused_loop() {
+        assert_eq!(SimSpeed::Normal.cycle_next(), SimSpeed::Fast);
+        assert_eq!(SimSpeed::Fast.cycle_next(), SimSpeed::VeryFast);
+        assert_eq!(SimSpeed::VeryFast.cycle_next(), SimSpeed::Ultra);
+        assert_eq!(SimSpeed::Ultra.cycle_next(), SimSpeed::Normal);
+    }
+}

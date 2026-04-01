@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
+use crate::sim_core::clock::clock_tick_step;
 
 pub struct SimulationPlugin;
 
@@ -14,11 +15,15 @@ impl Plugin for SimulationPlugin {
 }
 
 fn sim_clock_tick(mut clock: ResMut<SimClock>, time: Res<Time>) {
-    let dt = time.delta_secs() * clock.speed.multiplier();
-    clock.elapsed += dt;
-    if clock.speed != SimSpeed::Paused {
-        clock.tick += 1;
-    }
+    let (elapsed, tick) = clock_tick_step(
+        clock.elapsed,
+        clock.tick,
+        time.delta_secs(),
+        clock.speed.multiplier(),
+        clock.speed == SimSpeed::Paused,
+    );
+    clock.elapsed = elapsed;
+    clock.tick = tick;
 }
 
 fn toggle_sim_speed(input: Res<ButtonInput<KeyCode>>, mut clock: ResMut<SimClock>) {

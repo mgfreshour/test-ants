@@ -4,6 +4,7 @@
 //! tested without Bevy ECS world setup, rendering components, or UI concerns.
 
 pub mod ant_logic;
+pub mod clock;
 pub mod nest_scoring;
 pub mod nest_transitions;
 pub mod rng;
