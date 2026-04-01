@@ -136,4 +136,40 @@ mod tests {
         let scores = compute_scores(&input);
         assert_eq!(choose_task(&scores), NestTaskChoice::AttendQueen);
     }
+
+    #[test]
+    fn move_brood_wins_when_unrelocated_brood_exists() {
+        let input = NestScoringInputBuilder::new()
+            .move_brood(6)
+            .food(0.0)
+            .build();
+        let scores = compute_scores(&input);
+        assert_eq!(choose_task(&scores), NestTaskChoice::MoveBrood);
+    }
+
+    #[test]
+    fn dig_wins_when_faces_present_and_ant_in_digging_age_window() {
+        let input = NestScoringInputBuilder::new()
+            .dig_front(1.0, true)
+            .age(90.0)
+            .build();
+        let scores = compute_scores(&input);
+        assert_eq!(choose_task(&scores), NestTaskChoice::Dig);
+    }
+
+    #[test]
+    fn mover_crowding_reduces_move_brood_pressure() {
+        let low_crowd = NestScoringInputBuilder::new()
+            .move_brood(4)
+            .mover_load(0)
+            .build();
+        let high_crowd = NestScoringInputBuilder::new()
+            .move_brood(4)
+            .mover_load(6)
+            .build();
+
+        let low_scores = compute_scores(&low_crowd);
+        let high_scores = compute_scores(&high_crowd);
+        assert!(low_scores.move_brood > high_scores.move_brood);
+    }
 }

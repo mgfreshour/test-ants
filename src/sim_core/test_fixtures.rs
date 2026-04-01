@@ -46,6 +46,28 @@ impl NestScoringInputBuilder {
         self
     }
 
+    pub fn move_brood(mut self, count: usize) -> Self {
+        self.input.unrelocated_brood = count;
+        self
+    }
+
+    pub fn dig_front(mut self, construction: f32, player_zone: bool) -> Self {
+        self.input.has_dig_faces = true;
+        self.input.nearest_face_construction = construction;
+        self.input.has_player_dig_zones = player_zone;
+        self
+    }
+
+    pub fn age(mut self, ant_age: f32) -> Self {
+        self.input.ant_age = ant_age;
+        self
+    }
+
+    pub fn mover_load(mut self, current_movers: usize) -> Self {
+        self.input.current_movers = current_movers;
+        self
+    }
+
     pub fn build(self) -> NestScoringInput {
         self.input
     }
