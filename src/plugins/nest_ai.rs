@@ -33,6 +33,7 @@ impl Plugin for NestAiPlugin {
                     apply_excavated_cells,
                     portal_transition,
                     nest_to_surface_transition,
+                    nest_ant_feeding,
                     nest_utility_scoring,
                     nest_task_advance,
                     construction_pheromone_deposit,
@@ -286,6 +287,40 @@ fn nest_to_surface_transition(
                     .remove::<NestPath>();
             }
         }
+    }
+}
+
+// ── Nest Ant Feeding ─────────────────────────────────────────────────
+
+/// Nest ants eat from colony food stores when hungry. Without this they
+/// have no way to reduce hunger and will starve.
+const NEST_FEED_THRESHOLD: f32 = 0.4;
+/// Hunger relief per feeding event.
+const NEST_FEED_RELIEF: f32 = 0.5;
+/// Colony food consumed per feeding event.
+const NEST_FEED_COST: f32 = 0.2;
+
+fn nest_ant_feeding(
+    clock: Res<SimClock>,
+    mut map_query: Query<&mut ColonyFood, With<MapMarker>>,
+    mut query: Query<(&mut Ant, &MapId), With<NestTask>>,
+) {
+    if clock.speed == SimSpeed::Paused {
+        return;
+    }
+
+    for (mut ant, map_id) in &mut query {
+        if ant.hunger < NEST_FEED_THRESHOLD {
+            continue;
+        }
+
+        let Ok(mut colony_food) = map_query.get_mut(map_id.0) else { continue };
+        if colony_food.stored < NEST_FEED_COST {
+            continue;
+        }
+
+        colony_food.stored -= NEST_FEED_COST;
+        ant.hunger = (ant.hunger - NEST_FEED_RELIEF).max(0.0);
     }
 }
 

@@ -6,8 +6,9 @@ use crate::components::map::{MapId, MapMarker, MapPortal};
 use crate::components::nest::FoodEntity;
 
 /// Hunger increases per second of simulation time. At this rate an ant goes
-/// from 0 → 1.0 in ~100 seconds of sim time.
-const HUNGER_RATE: f32 = 0.01;
+/// from 0 → 1.0 in ~250 seconds (~4 min) of sim time, giving foragers enough
+/// time to locate distant food and return.
+const HUNGER_RATE: f32 = 0.004;
 /// Above this hunger threshold ants slow down.
 const HUNGER_SLOW_THRESHOLD: f32 = 0.8;
 /// Movement speed multiplier when very hungry.
@@ -41,6 +42,7 @@ impl Plugin for AntAiPlugin {
                 (
                     rebuild_spatial_grid,
                     hunger_tick,
+                    surface_ant_nest_feeding,
                     fix_orphaned_returners,
                     ant_forage_steering,
                     ant_return_steering,
@@ -114,8 +116,7 @@ const MIN_SENSE_INTENSITY: f32 = 1.5;
 fn hunger_tick(
     clock: Res<SimClock>,
     time: Res<Time>,
-    mut commands: Commands,
-    mut query: Query<(Entity, &mut Ant, &mut Health, Option<&CarriedItem>)>,
+    mut query: Query<(&mut Ant, &mut Health, Option<&CarriedItem>)>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -123,21 +124,67 @@ fn hunger_tick(
 
     let dt = time.delta_secs() * clock.speed.multiplier();
 
-    for (entity, mut ant, mut health, carried) in &mut query {
+    for (mut ant, mut health, carried) in &mut query {
         ant.hunger = (ant.hunger + HUNGER_RATE * dt).min(1.0);
 
-        // Self-feed: if hungry and carrying food, consume some
+        // Self-feed: if hungry and carrying food, take a bite (keeps the food).
         if ant.hunger > 0.5 {
-            if let Some(carried) = carried {
-                let relief = (carried.food_amount * 0.1).min(ant.hunger);
-                ant.hunger = (ant.hunger - relief).max(0.0);
-                commands.entity(entity).remove::<CarriedItem>();
+            if carried.is_some() {
+                ant.hunger = (ant.hunger - 0.4).max(0.0);
             }
         }
 
         // Starvation damage
         if ant.hunger >= 1.0 {
             health.current -= STARVATION_DPS * dt;
+        }
+    }
+}
+
+/// Surface ants near the nest portal eat from colony food stores when hungry.
+const NEST_FEED_RANGE: f32 = 60.0;
+
+fn surface_ant_nest_feeding(
+    clock: Res<SimClock>,
+    registry: Res<MapRegistry>,
+    portal_query: Query<&MapPortal>,
+    mut food_query: Query<&mut ColonyFood, With<MapMarker>>,
+    mut ant_query: Query<(&Transform, &ColonyMember, &MapId, &mut Ant), Without<CarriedItem>>,
+) {
+    if clock.speed == SimSpeed::Paused {
+        return;
+    }
+
+    for (transform, colony, map_id, mut ant) in &mut ant_query {
+        if map_id.0 != registry.surface || ant.hunger < 0.3 {
+            continue;
+        }
+
+        let pos = transform.translation.truncate();
+
+        let near_portal = portal_query.iter().any(|p| {
+            p.map == registry.surface
+                && p.colony_id.map_or(true, |id| id == colony.colony_id)
+                && pos.distance(p.position) < NEST_FEED_RANGE
+        });
+
+        if !near_portal {
+            continue;
+        }
+
+        // Find the nest's food store for this colony.
+        let target_nest = portal_query.iter().find(|p| {
+            p.map == registry.surface
+                && p.colony_id.map_or(true, |id| id == colony.colony_id)
+        });
+
+        if let Some(portal) = target_nest {
+            if let Ok(mut food) = food_query.get_mut(portal.target_map) {
+                if food.stored > 0.5 {
+                    food.stored -= 0.2;
+                    ant.hunger = (ant.hunger - 0.5).max(0.0);
+                }
+            }
         }
     }
 }

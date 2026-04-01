@@ -35,6 +35,31 @@ fn setup_terrain(mut commands: Commands, config: Res<SimConfig>, registry: Res<M
     let grass_dark = Color::srgb(0.22, 0.45, 0.15);
     let grass_light = Color::srgb(0.28, 0.52, 0.18);
 
+    // Nest entrance marker — dark mound with hole
+    let np = config.nest_position;
+    let mound_color = Color::srgb(0.35, 0.25, 0.15);
+    let hole_color = Color::srgb(0.08, 0.05, 0.02);
+    // Outer mound ring
+    commands.spawn((
+        Sprite {
+            color: mound_color,
+            custom_size: Some(Vec2::splat(28.0)),
+            ..default()
+        },
+        Transform::from_xyz(np.x, np.y, 1.0),
+        MapId(registry.surface),
+    ));
+    // Inner dark hole
+    commands.spawn((
+        Sprite {
+            color: hole_color,
+            custom_size: Some(Vec2::splat(14.0)),
+            ..default()
+        },
+        Transform::from_xyz(np.x, np.y, 1.1),
+        MapId(registry.surface),
+    ));
+
     for x in 0..tile_count_x {
         for y in 0..tile_count_y {
             let color = if (x + y) % 2 == 0 {
@@ -67,11 +92,24 @@ fn spawn_food_sources(mut commands: Commands, config: Res<SimConfig>, registry: 
     let food_configs = [
         (150.0, 18.0, Color::srgb(0.9, 0.7, 0.2)),  // large fruit
         (150.0, 18.0, Color::srgb(0.85, 0.6, 0.15)),
+        (150.0, 18.0, Color::srgb(0.85, 0.6, 0.15)),
+        (150.0, 18.0, Color::srgb(0.85, 0.6, 0.15)),
+        (150.0, 18.0, Color::srgb(0.85, 0.6, 0.15)),
+        (150.0, 18.0, Color::srgb(0.85, 0.6, 0.15)),
+        (150.0, 18.0, Color::srgb(0.85, 0.6, 0.15)),
         (120.0, 12.0, Color::srgb(0.6, 0.3, 0.2)),   // dead insect
+        (120.0, 12.0, Color::srgb(0.55, 0.35, 0.2)),
+        (120.0, 12.0, Color::srgb(0.55, 0.35, 0.2)),
+        (120.0, 12.0, Color::srgb(0.55, 0.35, 0.2)),
+        (120.0, 12.0, Color::srgb(0.55, 0.35, 0.2)),
         (120.0, 12.0, Color::srgb(0.55, 0.35, 0.2)),
         (15.0, 6.0, Color::srgb(0.9, 0.85, 0.7)),    // crumbs
         (15.0, 6.0, Color::srgb(0.85, 0.8, 0.65)),
         (15.0, 6.0, Color::srgb(0.88, 0.82, 0.68)),
+        (15.0, 6.0, Color::srgb(0.92, 0.87, 0.72)),
+        (15.0, 6.0, Color::srgb(0.92, 0.87, 0.72)),
+        (15.0, 6.0, Color::srgb(0.92, 0.87, 0.72)),
+        (15.0, 6.0, Color::srgb(0.92, 0.87, 0.72)),
         (15.0, 6.0, Color::srgb(0.92, 0.87, 0.72)),
     ];
 

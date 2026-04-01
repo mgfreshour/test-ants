@@ -237,12 +237,13 @@ fn cycle_map_view(
 /// Runs every frame but early-exits when nothing changed.
 fn sync_map_visibility(
     active: Res<ActiveMap>,
-    mut query: Query<(&MapId, &mut Visibility)>,
+    mut query: Query<(Ref<MapId>, &mut Visibility)>,
 ) {
-    if !active.is_changed() {
-        return;
-    }
+    let map_changed = active.is_changed();
     for (map_id, mut vis) in &mut query {
+        if !map_changed && !map_id.is_added() {
+            continue;
+        }
         *vis = if map_id.0 == active.entity {
             Visibility::Inherited
         } else {
