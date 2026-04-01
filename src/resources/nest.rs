@@ -37,7 +37,7 @@ impl Default for NestGrid {
 
         // Food storage chamber (near surface, left of tunnel)
         for y in 5..8 {
-            for x in (cx - 5)..(cx - 1) {
+            for x in (cx - 3)..(cx +1) {
                 cells[y][x] = CellType::Chamber(ChamberKind::FoodStorage);
             }
         }
@@ -50,7 +50,7 @@ impl Default for NestGrid {
         }
 
         // Connecting tunnel to brood
-        for y in 7..9 {
+        for y in 5..9 {
             cells[y][cx] = CellType::Tunnel;
             cells[y][cx + 1] = CellType::Tunnel;
         }
@@ -63,7 +63,7 @@ impl Default for NestGrid {
         }
 
         // Tunnel from brood to queen
-        for y in 12..16 {
+        for y in 9..16 {
             cells[y][cx] = CellType::Tunnel;
         }
 
@@ -97,4 +97,47 @@ impl NestGrid {
             CellType::Rock
         }
     }
+
+    /// Mutate a cell (e.g., excavate soil -> tunnel). Returns true if changed.
+    pub fn set(&mut self, x: usize, y: usize, cell_type: CellType) -> bool {
+        if y < self.height && x < self.width {
+            self.cells[y][x] = cell_type;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Find diggable cells adjacent to passable cells (dig faces).
+    pub fn find_dig_faces(&self) -> Vec<(usize, usize)> {
+        let mut faces = Vec::new();
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if !self.get(x, y).is_diggable() {
+                    continue;
+                }
+                let has_passable_neighbor = [(-1i32, 0), (1, 0), (0, -1i32), (0, 1)]
+                    .iter()
+                    .any(|&(dx, dy)| {
+                        let nx = x as i32 + dx;
+                        let ny = y as i32 + dy;
+                        nx >= 0
+                            && ny >= 0
+                            && (nx as usize) < self.width
+                            && (ny as usize) < self.height
+                            && self.get(nx as usize, ny as usize).is_passable()
+                    });
+                if has_passable_neighbor {
+                    faces.push((x, y));
+                }
+            }
+        }
+        faces
+    }
+}
+
+/// Player-designated dig targets. Cells in this set get a utility scoring boost.
+#[derive(Resource, Default)]
+pub struct PlayerDigZones {
+    pub cells: std::collections::HashSet<(usize, usize)>,
 }

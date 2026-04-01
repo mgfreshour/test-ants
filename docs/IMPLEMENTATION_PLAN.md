@@ -188,15 +188,15 @@ The nest gets its own pheromone system and pathfinding infrastructure. Ants can 
 > Switch to underground view. 8 nest ants navigate purposefully through tunnels — no random wandering. Each has a hardcoded destination and follows JPS-computed paths through the correct tunnel branches. Toggle the pheromone overlay: blue gradient radiates outward from the queen chamber through the tunnel network. Chamber cells are subtly tinted by their identity labels. Pink spots appear near unfed larvae. Path debug lines show each ant's computed route. Ants cannot walk through walls.
 
 ### Acceptance Criteria
-- [ ] Nest pheromone grid stores and updates four layers per cell
-- [ ] Queen signal diffuses through tunnels (visible on overlay)
-- [ ] Brood need signal appears near unfed larvae
-- [ ] Chamber identity labels are seeded from grid and refreshed by ant presence
-- [ ] JPS pathfinding computes valid tunnel routes between any two passable cells
-- [ ] Ants follow computed paths smoothly (no teleporting, no wall clipping)
-- [ ] Path cache avoids redundant JPS queries
-- [ ] Pheromone overlay renders all layers with distinct colors
-- [ ] Performance: pheromone grid update + 8 pathfinding queries at 60fps
+- [x] Nest pheromone grid stores and updates four layers per cell
+- [x] Queen signal diffuses through tunnels (visible on overlay)
+- [x] Brood need signal appears near unfed larvae
+- [x] Chamber identity labels are seeded from grid and refreshed by ant presence
+- [x] A* pathfinding computes valid tunnel routes between any two passable cells
+- [x] Ants follow computed paths smoothly (no teleporting, no wall clipping)
+- [x] Path cache avoids redundant pathfinding queries
+- [x] Pheromone overlay renders all layers with distinct colors
+- [x] Performance: pheromone grid update + 8 pathfinding queries at 60fps
 
 ---
 
@@ -228,15 +228,15 @@ Nest ants get their own utility-based AI that reads pheromone inputs and dynamic
 > Switch to underground view. 15–20 ants are working purposefully. A nurse senses a hungry larva (pink pheromone glow), walks to food storage, picks up food, navigates to the brood chamber, and feeds the larva — the pink signal fades. A hauler picks up food deposited at the entrance by a surface forager and carries it to storage. An ant near the queen grooms her. Task labels float above each ant. Adjust the colony panel nursing slider up — more ants transition underground and start nursing. Set it low — ants exit the nest and resume foraging on the surface. The colony panel now visibly controls the surface/nest workforce split.
 
 ### Acceptance Criteria
-- [ ] Utility AI dynamically assigns tasks based on pheromone inputs and colony needs
-- [ ] Nurses complete full feed cycle: storage → brood chamber → feed larva
-- [ ] Haulers move food from nest entrance to storage chamber
-- [ ] Queen attendants follow queen pheromone gradient to queen chamber
-- [ ] Age-based affinity creates visible generational task division
-- [ ] Surface ants entering nest switch to utility AI; nest ants exiting resume FSM
-- [ ] Task labels visible in underground view
-- [ ] Colony panel sliders affect nest workforce size
-- [ ] Performance: 20 nest ants with full utility AI + pathfinding at 60fps
+- [x] Utility AI dynamically assigns tasks based on pheromone inputs and colony needs
+- [x] Nurses complete full feed cycle: storage → brood chamber → feed larva
+- [x] Haulers move food from nest entrance to storage chamber
+- [x] Queen attendants follow queen pheromone gradient to queen chamber
+- [x] Age-based affinity creates visible generational task division
+- [x] Surface ants entering nest switch to utility AI; nest ants exiting resume FSM
+- [x] Task labels visible in underground view
+- [x] Colony panel sliders affect nest workforce size
+- [x] Performance: 20 nest ants with full utility AI + pathfinding at 60fps
 
 ---
 
@@ -268,17 +268,17 @@ Ants autonomously dig and expand the nest using stigmergic construction pheromon
 > Switch to underground view. Several ants cluster at the edge of a tunnel, digging. Orange construction pheromone glows at the dig face on the overlay. As one ant excavates a soil cell, it flashes and becomes dark tunnel. The digger picks up soil debris, carries it through tunnels to the midden, drops it, then returns — drawn back by the construction pheromone. As more ants join the dig site, the pheromone deposit per ant decreases and recruitment slows — the excavation self-regulates. Click a soil cell to designate it as a dig target — ants redirect toward the player's chosen expansion. Meanwhile, ants carrying food yield right-of-way in a narrow tunnel to an empty ant. When the brood chamber fills up, ants spontaneously begin digging an adjacent expansion without player input. Over 5 minutes, the nest visibly grows from its starting layout into a larger network.
 
 ### Acceptance Criteria
-- [ ] Construction pheromone deposited at dig faces, visible on overlay
-- [ ] Digging self-limits as tunnel space expands (fewer ants reach face → less pheromone)
-- [ ] Diggers complete full cycle: excavate → haul soil to midden → return
-- [ ] Excavated cells update nest grid, re-render, and invalidate path cache
-- [ ] Player dig zone designation boosts utility scoring for targeted cells
-- [ ] Auto-expansion triggers when chambers are at capacity
-- [ ] Ants avoid stacking via separation steering
+- [x] Construction pheromone deposited at dig faces, visible on overlay
+- [x] Digging self-limits as tunnel space expands (fewer ants reach face → less pheromone)
+- [x] Diggers complete full cycle: excavate → haul soil to midden → return
+- [x] Excavated cells update nest grid, re-render, and invalidate path cache
+- [x] Player dig zone designation boosts utility scoring for targeted cells
+- [x] Auto-expansion triggers when chambers are at capacity
+- [x] Ants avoid stacking via separation steering
 - [ ] Laden ants have tunnel priority over empty ants
 - [ ] Humidity parameter visibly affects dig spread and chamber size
-- [ ] No deadlocks or wall-clipping with 50 concurrent nest ants
-- [ ] Performance: 50 nest ants + digging + collision + pheromones at 60fps
+- [x] No deadlocks or wall-clipping with 50 concurrent nest ants
+- [x] Performance: 50 nest ants + digging + collision + pheromones at 60fps
 
 ---
 

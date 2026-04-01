@@ -25,6 +25,21 @@ impl CellType {
         matches!(self, CellType::Tunnel | CellType::Chamber(_))
     }
 
+    /// Whether this cell can be excavated by a digger ant.
+    pub fn is_diggable(&self) -> bool {
+        matches!(self, CellType::Soil | CellType::SoftSoil | CellType::Clay)
+    }
+
+    /// Excavation time in seconds for this soil type.
+    pub fn dig_duration(&self) -> f32 {
+        match self {
+            CellType::SoftSoil => 1.0,
+            CellType::Soil => 3.0,
+            CellType::Clay => 6.0,
+            _ => f32::MAX, // Rock and passable cells can't be dug
+        }
+    }
+
     pub fn color(&self) -> Color {
         match self {
             CellType::Soil => Color::srgb(0.45, 0.32, 0.18),
@@ -123,6 +138,7 @@ pub enum NestTask {
     FeedLarva { step: FeedStep, target_larva: Option<Entity> },
     HaulFood { step: HaulStep },
     AttendQueen { step: AttendStep },
+    Dig { step: DigStep, target_cell: Option<GridPos>, dig_timer: f32 },
     Idle { timer: f32 },
 }
 
@@ -149,12 +165,22 @@ pub enum AttendStep {
     Grooming,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DigStep {
+    GoToFace,
+    Excavate,
+    PickUpSoil,
+    GoToMidden,
+    DropSoil,
+}
+
 impl NestTask {
     pub fn label(&self) -> &'static str {
         match self {
             NestTask::FeedLarva { .. } => "N",
             NestTask::HaulFood { .. } => "H",
             NestTask::AttendQueen { .. } => "Q",
+            NestTask::Dig { .. } => "D",
             NestTask::Idle { .. } => "I",
         }
     }
@@ -164,6 +190,7 @@ impl NestTask {
             NestTask::FeedLarva { .. } => Color::srgb(0.8, 0.6, 1.0),
             NestTask::HaulFood { .. } => Color::srgb(0.6, 0.9, 0.3),
             NestTask::AttendQueen { .. } => Color::srgb(1.0, 0.8, 0.2),
+            NestTask::Dig { .. } => Color::srgb(0.7, 0.5, 0.3),
             NestTask::Idle { .. } => Color::srgba(1.0, 1.0, 1.0, 0.4),
         }
     }
