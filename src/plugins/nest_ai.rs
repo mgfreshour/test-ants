@@ -18,6 +18,7 @@ use crate::resources::nest_pheromone::{
 };
 use crate::resources::simulation::{SimClock, SimSpeed};
 use crate::sim_core::nest_scoring::{choose_task, compute_scores, NestScoringInput, NestTaskChoice};
+use crate::sim_core::nest_transitions;
 
 pub struct NestAiPlugin;
 
@@ -519,16 +520,17 @@ fn nest_task_advance(
 
         // "at_destination" = ant has arrived (path completed) or has no path (already cleaned up).
         // Used by action steps that need the ant to be at a location.
-        let at_destination = path_done || has_no_path;
+        let at_destination = nest_transitions::at_destination(path_done, has_no_path);
 
         match &mut *task {
             NestTask::FeedLarva { step, target_larva } => {
                 match step {
                     FeedStep::GoToStorage => {
                         if at_destination {
-                            if path.is_some() {
-                                // Path existed and completed — advance.
-                                *step = FeedStep::PickUpFood;
+                            if let Some(next) =
+                                nest_transitions::next_feed_step_on_arrival(*step, path.is_some())
+                            {
+                                *step = next;
                             } else {
                                 // No path yet — request one.
                                 if let Some(goal) = find_label_cell(&grid, LABEL_FOOD_STORAGE) {
@@ -576,8 +578,10 @@ fn nest_task_advance(
                     }
                     FeedStep::GoToBrood => {
                         if at_destination {
-                            if path.is_some() {
-                                *step = FeedStep::FindLarva;
+                            if let Some(next) =
+                                nest_transitions::next_feed_step_on_arrival(*step, path.is_some())
+                            {
+                                *step = next;
                             } else {
                                 if let Some(goal) = find_label_cell(&grid, LABEL_BROOD) {
                                     if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
@@ -640,8 +644,11 @@ fn nest_task_advance(
                 match step {
                     MoveBroodStep::GoToQueen => {
                         if at_destination {
-                            if path.is_some() {
-                                *step = MoveBroodStep::PickUpBrood;
+                            if let Some(next) = nest_transitions::next_move_brood_step_on_arrival(
+                                *step,
+                                path.is_some(),
+                            ) {
+                                *step = next;
                             } else {
                                 if let Some(goal) = find_label_cell(&grid, LABEL_QUEEN) {
                                     if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
@@ -684,8 +691,11 @@ fn nest_task_advance(
                     }
                     MoveBroodStep::GoToBrood => {
                         if at_destination {
-                            if path.is_some() {
-                                *step = MoveBroodStep::PlaceBrood;
+                            if let Some(next) = nest_transitions::next_move_brood_step_on_arrival(
+                                *step,
+                                path.is_some(),
+                            ) {
+                                *step = next;
                             } else {
                                 if let Some(goal) = find_label_cell(&grid, LABEL_BROOD) {
                                     if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
@@ -719,8 +729,10 @@ fn nest_task_advance(
                 match step {
                     HaulStep::GoToEntrance => {
                         if at_destination {
-                            if path.is_some() {
-                                *step = HaulStep::PickUpFood;
+                            if let Some(next) =
+                                nest_transitions::next_haul_step_on_arrival(*step, path.is_some())
+                            {
+                                *step = next;
                             } else {
                                 if let Some(goal) = find_label_cell(&grid, LABEL_ENTRANCE) {
                                     if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
@@ -770,8 +782,10 @@ fn nest_task_advance(
                     }
                     HaulStep::GoToStorage => {
                         if at_destination {
-                            if path.is_some() {
-                                *step = HaulStep::DropFood;
+                            if let Some(next) =
+                                nest_transitions::next_haul_step_on_arrival(*step, path.is_some())
+                            {
+                                *step = next;
                             } else {
                                 if let Some(goal) = find_label_cell(&grid, LABEL_FOOD_STORAGE) {
                                     if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
@@ -826,8 +840,11 @@ fn nest_task_advance(
                 match step {
                     AttendStep::GoToStorage => {
                         if at_destination {
-                            if path.is_some() {
-                                *step = AttendStep::PickUpFood;
+                            if let Some(next) = nest_transitions::next_attend_step_on_arrival(
+                                *step,
+                                path.is_some(),
+                            ) {
+                                *step = next;
                             } else {
                                 if let Some(goal) = find_label_cell(&grid, LABEL_FOOD_STORAGE) {
                                     if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
@@ -874,8 +891,11 @@ fn nest_task_advance(
                     }
                     AttendStep::GoToQueen => {
                         if at_destination {
-                            if path.is_some() {
-                                *step = AttendStep::FeedQueen;
+                            if let Some(next) = nest_transitions::next_attend_step_on_arrival(
+                                *step,
+                                path.is_some(),
+                            ) {
+                                *step = next;
                             } else {
                                 if let Some(goal) = find_label_cell(&grid, LABEL_QUEEN) {
                                     if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
@@ -920,9 +940,11 @@ fn nest_task_advance(
                 match step {
                     DigStep::GoToFace => {
                         if at_destination {
-                            if path.is_some() {
+                            if let Some(next) =
+                                nest_transitions::next_dig_step_on_arrival(*step, path.is_some())
+                            {
                                 // Path existed and completed — advance to excavation.
-                                *step = DigStep::Excavate;
+                                *step = next;
                             } else {
                                 // No path yet — pick a target and request path.
                                 let dig_faces = grid.find_dig_faces();

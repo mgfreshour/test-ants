@@ -36,7 +36,7 @@ Do not test:
        Why: enables deterministic tests for foraging/returning/transition behaviors.
 4. [x] **W4 (P0/L) - REFACTOR** Extract nest utility scoring from `nest_ai` into pure scoring API.  
        Why: makes task-selection behavior testable with table-driven tests.
-5. [ ] **W5 (P0/XL) - REFACTOR** Separate task state-machine transitions from ECS mutation in `nest_task_advance`.  
+5. [x] **W5 (P0/XL) - REFACTOR** Separate task state-machine transitions from ECS mutation in `nest_task_advance`.  
        Why: allows exhaustive sub-step transition tests without world setup overhead.
 6. [ ] **W6 (P0/M) - REFACTOR** Add deterministic RNG abstraction (`trait SimRng`) and seeded test implementation.  
        Why: removes flakiness from steering/selection tests.
