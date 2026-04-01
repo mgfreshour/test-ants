@@ -4,6 +4,7 @@ use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use crate::components::ant::{Ant, AntState, CarriedItem};
 use crate::plugins::ant_ai::ColonyFood;
 use crate::plugins::pheromone::{OverlayDisplay, OverlayState};
+use crate::resources::colony::ColonyStats;
 use crate::resources::simulation::SimClock;
 
 pub struct HudPlugin;
@@ -41,6 +42,7 @@ fn update_hud(
     clock: Res<SimClock>,
     overlay: Res<OverlayState>,
     colony_food: Res<ColonyFood>,
+    stats: Res<ColonyStats>,
     diagnostics: Res<DiagnosticsStore>,
     ant_query: Query<(&Ant, Option<&CarriedItem>)>,
     mut text_query: Query<&mut Text, With<HudText>>,
@@ -49,11 +51,9 @@ fn update_hud(
         return;
     };
 
-    let mut total = 0;
-    let mut foraging = 0;
-    let mut returning = 0;
+    let mut foraging = 0u32;
+    let mut returning = 0u32;
     for (ant, _carried) in &ant_query {
-        total += 1;
         match ant.state {
             AntState::Foraging => foraging += 1,
             AntState::Returning => returning += 1,
@@ -78,13 +78,15 @@ fn update_hud(
         "Off"
     };
 
+    let pop = stats.workers + stats.soldiers + stats.drones;
+    let brood = stats.eggs + stats.larvae + stats.pupae;
+
     **text = format!(
-        "Ants: {} (forage:{} return:{})  |  Food: {:.0}  |  Speed: {}  |  Overlay: {}  |  FPS: {:.0}\n\
-         [Space] Pause  [.] Speed  [H] Overlay  [WASD] Pan  [Scroll] Zoom",
-        total,
-        foraging,
-        returning,
+        "Pop: {} (W:{} S:{}) Brood: {} (E:{} L:{} P:{})  |  Food: {:.0}  |  Forage:{} Ret:{}  |  {}  |  Overlay:{}  |  FPS:{:.0}",
+        pop, stats.workers, stats.soldiers,
+        brood, stats.eggs, stats.larvae, stats.pupae,
         colony_food.stored,
+        foraging, returning,
         clock.speed.label(),
         overlay_label,
         fps,
