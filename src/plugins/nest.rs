@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::ant::{Ant, Caste, ColonyMember, Health, Movement};
+use crate::components::ant::{Ant, Caste, ColonyMember, Health, Movement, PositionHistory};
 use crate::components::nest::{Brood, BroodStage, NestTile, Queen};
 use crate::plugins::ant_ai::ColonyFood;
 use crate::resources::colony::{CasteRatios, ColonyStats};
@@ -269,6 +269,7 @@ fn brood_development(
                         Movement::with_random_direction(speed, &mut rng),
                         health,
                         ColonyMember { colony_id: 0 },
+                        PositionHistory::default(),
                     ));
                 }
             }

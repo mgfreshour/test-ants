@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::ant::{Ant, AntState, CarriedItem, ColonyMember, Health, Movement};
+use crate::components::ant::{Ant, AntState, CarriedItem, ColonyMember, Health, Movement, PositionHistory};
 use crate::components::pheromone::PheromoneType;
 use crate::components::terrain::{FoodSource, NestEntrance};
 use crate::resources::pheromone::{PheromoneConfig, PheromoneGrid};
@@ -24,11 +24,13 @@ impl Plugin for AntAiPlugin {
                 Update,
                 (
                     rebuild_spatial_grid,
+                    fix_orphaned_returners,
                     ant_forage_steering,
                     ant_return_steering,
                     food_detection_and_pickup,
                     nest_food_deposit,
                     ant_movement,
+                    record_position_history,
                     ant_boundary_bounce,
                     ant_pheromone_deposit,
                     update_ant_visuals,
@@ -58,6 +60,7 @@ fn spawn_initial_ants(mut commands: Commands, config: Res<SimConfig>) {
             Movement::with_random_direction(config.ant_speed_worker, &mut rng),
             Health::worker(),
             ColonyMember { colony_id: 0 },
+            PositionHistory::default(),
         ));
     }
 }
@@ -72,12 +75,34 @@ fn rebuild_spatial_grid(
     }
 }
 
-/// Foraging ants: follow FOOD pheromone gradient or random walk, biased away from HOME
+const ANTI_BACKTRACK_WEIGHT: f32 = 0.35;
+const FORWARD_WEIGHT: f32 = 0.6;
+const SENSE_RANGE: f32 = 60.0;
+const PHERO_SENSE_RADIUS: i32 = 4;
+const PHERO_TRAIL_WEIGHT: f32 = 1.5;
+/// Probability an ant follows a detected pheromone trail vs. ignoring it to scout
+const TRAIL_FOLLOW_CHANCE: f32 = 0.6;
+
+/// Reset ants stuck in Returning state without food back to Foraging.
+fn fix_orphaned_returners(
+    mut query: Query<(&mut Ant, &mut PositionHistory), Without<CarriedItem>>,
+) {
+    for (mut ant, mut history) in &mut query {
+        if ant.state == AntState::Returning {
+            ant.state = AntState::Foraging;
+            history.clear();
+        }
+    }
+}
+
+/// Foraging ants: follow FOOD pheromone gradient or random walk, biased away from HOME.
+/// Within SENSE_RANGE of a food source, head straight for it.
 fn ant_forage_steering(
     clock: Res<SimClock>,
     config: Res<SimConfig>,
     phero_grid: Option<Res<PheromoneGrid>>,
-    mut query: Query<(&Transform, &mut Movement, &Ant), Without<CarriedItem>>,
+    food_query: Query<&Transform, With<FoodSource>>,
+    mut query: Query<(&Transform, &mut Movement, &Ant, &PositionHistory), Without<CarriedItem>>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -86,88 +111,137 @@ fn ant_forage_steering(
     let mut rng = rand::thread_rng();
     let noise = config.exploration_noise;
 
-    for (transform, mut movement, ant) in &mut query {
+    for (transform, mut movement, ant, history) in &mut query {
         if ant.state != AntState::Foraging {
             continue;
         }
 
         let pos = transform.translation.truncate();
+        let fwd = movement.direction;
+
+        // Check for nearby food — override all other steering
+        let mut nearest_food: Option<(f32, Vec2)> = None;
+        for food_tf in &food_query {
+            let food_pos = food_tf.translation.truncate();
+            let dist = pos.distance(food_pos);
+            if dist < SENSE_RANGE {
+                if nearest_food.is_none() || dist < nearest_food.unwrap().0 {
+                    nearest_food = Some((dist, food_pos));
+                }
+            }
+        }
+
+        if let Some((_, food_pos)) = nearest_food {
+            let to_food = (food_pos - pos).normalize_or_zero();
+            movement.direction = to_food;
+            continue;
+        }
+
         let mut pheromone_bias = Vec2::ZERO;
+        let mut on_trail = false;
 
         if let Some(ref grid) = phero_grid {
             if let Some((gx, gy)) = grid.world_to_grid(pos) {
-                // Follow food pheromone toward food sources
-                let food_grad = grid.sense_gradient(gx, gy, PheromoneType::Food);
-                if food_grad.length_squared() > 0.01 {
-                    pheromone_bias += food_grad.normalize() * food_grad.length().min(10.0) * 0.05;
-                }
-                // Slight bias away from home pheromone (explore outward)
-                let home_grad = grid.sense_gradient(gx, gy, PheromoneType::Home);
-                if home_grad.length_squared() > 0.01 {
-                    pheromone_bias -= home_grad.normalize() * 0.01;
+                let food_grad =
+                    grid.sense_gradient(gx, gy, PheromoneType::Food, fwd, PHERO_SENSE_RADIUS);
+                if food_grad.length_squared() > 0.01
+                    && rng.gen::<f32>() < TRAIL_FOLLOW_CHANCE
+                {
+                    let fg = food_grad.normalize();
+                    let along = fwd.dot(fg) * fwd;
+                    let lateral = fg - along;
+                    if lateral.length_squared() > 0.001 {
+                        pheromone_bias += lateral.normalize() * PHERO_TRAIL_WEIGHT;
+                    }
+                    on_trail = true;
                 }
             }
         }
 
         let angle_offset = rng.gen_range(-noise..noise) * std::f32::consts::TAU;
-        let current_angle = movement.direction.y.atan2(movement.direction.x);
+        let current_angle = fwd.y.atan2(fwd.x);
         let new_angle = current_angle + angle_offset;
-        let random_dir = Vec2::new(new_angle.cos(), new_angle.sin());
+        let perturbed_fwd = Vec2::new(new_angle.cos(), new_angle.sin());
 
-        let mut new_dir = (random_dir + pheromone_bias).normalize_or_zero();
+        let momentum = history.anti_backtrack(pos) * ANTI_BACKTRACK_WEIGHT;
+
+        // When on a pheromone trail, reduce random noise so the ant commits to following it
+        let noise_scale = if on_trail { 0.3 } else { 1.0 };
+        let mut new_dir = (fwd * FORWARD_WEIGHT
+            + perturbed_fwd * noise_scale
+            + pheromone_bias
+            + momentum)
+            .normalize_or_zero();
         if new_dir == Vec2::ZERO {
-            new_dir = random_dir;
+            new_dir = perturbed_fwd;
         }
         movement.direction = new_dir;
     }
 }
 
-/// Returning ants: follow HOME pheromone gradient back to nest
+/// Returning ants: follow HOME pheromone gradient back to nest.
+/// Within SENSE_RANGE of the nest, head straight for it.
 fn ant_return_steering(
     clock: Res<SimClock>,
     config: Res<SimConfig>,
     phero_grid: Option<Res<PheromoneGrid>>,
-    mut query: Query<(&Transform, &mut Movement, &Ant), With<CarriedItem>>,
+    mut query: Query<(&Transform, &mut Movement, &Ant, &PositionHistory), With<CarriedItem>>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
     }
 
     let mut rng = rand::thread_rng();
-    let noise = config.exploration_noise * 0.5; // less random when returning
+    let noise = config.exploration_noise * 0.5;
     let nest_pos = config.nest_position;
 
-    for (transform, mut movement, ant) in &mut query {
+    for (transform, mut movement, ant, history) in &mut query {
         if ant.state != AntState::Returning {
             continue;
         }
 
         let pos = transform.translation.truncate();
+        let to_nest = nest_pos - pos;
+        let dist_to_nest = to_nest.length();
+
+        // Close enough to sense the nest directly — beeline for it
+        if dist_to_nest < SENSE_RANGE {
+            movement.direction = to_nest.normalize_or_zero();
+            continue;
+        }
+
+        let fwd = movement.direction;
         let mut bias = Vec2::ZERO;
+
+        let mut on_trail = false;
 
         if let Some(ref grid) = phero_grid {
             if let Some((gx, gy)) = grid.world_to_grid(pos) {
-                let home_grad = grid.sense_gradient(gx, gy, PheromoneType::Home);
+                let home_grad =
+                    grid.sense_gradient(gx, gy, PheromoneType::Home, fwd, PHERO_SENSE_RADIUS);
                 if home_grad.length_squared() > 0.01 {
-                    bias += home_grad.normalize() * home_grad.length().min(10.0) * 0.08;
+                    bias += home_grad.normalize() * PHERO_TRAIL_WEIGHT;
+                    on_trail = true;
                 }
             }
         }
 
-        // Fallback: direct vector toward nest
-        let to_nest = nest_pos - pos;
-        if to_nest.length_squared() > 1.0 {
+        if dist_to_nest > 1.0 {
             bias += to_nest.normalize() * 0.03;
         }
 
         let angle_offset = rng.gen_range(-noise..noise) * std::f32::consts::TAU;
-        let current_angle = movement.direction.y.atan2(movement.direction.x);
+        let current_angle = fwd.y.atan2(fwd.x);
         let new_angle = current_angle + angle_offset;
-        let random_dir = Vec2::new(new_angle.cos(), new_angle.sin());
+        let perturbed_fwd = Vec2::new(new_angle.cos(), new_angle.sin());
 
-        let mut new_dir = (random_dir + bias).normalize_or_zero();
+        let momentum = history.anti_backtrack(pos) * ANTI_BACKTRACK_WEIGHT;
+
+        let noise_scale = if on_trail { 0.3 } else { 1.0 };
+        let mut new_dir = (fwd * FORWARD_WEIGHT + perturbed_fwd * noise_scale + bias + momentum)
+            .normalize_or_zero();
         if new_dir == Vec2::ZERO {
-            new_dir = random_dir;
+            new_dir = perturbed_fwd;
         }
         movement.direction = new_dir;
     }
@@ -180,7 +254,7 @@ fn food_detection_and_pickup(
     clock: Res<SimClock>,
     mut commands: Commands,
     mut ant_query: Query<
-        (Entity, &Transform, &mut Ant),
+        (Entity, &Transform, &mut Ant, &mut PositionHistory),
         Without<CarriedItem>,
     >,
     mut food_query: Query<(&Transform, &mut FoodSource)>,
@@ -189,13 +263,12 @@ fn food_detection_and_pickup(
         return;
     }
 
-    for (ant_entity, ant_transform, mut ant) in &mut ant_query {
+    for (ant_entity, ant_transform, mut ant, mut history) in &mut ant_query {
         if ant.state != AntState::Foraging {
             continue;
         }
 
         let ant_pos = ant_transform.translation.truncate();
-        let mut picked_up = false;
 
         for (food_transform, mut food) in &mut food_query {
             if food.remaining <= 0.0 {
@@ -209,12 +282,10 @@ fn food_detection_and_pickup(
                 food.remaining -= amount;
                 commands.entity(ant_entity).insert(CarriedItem { food_amount: amount });
                 ant.state = AntState::Returning;
-                picked_up = true;
+                history.clear();
                 break;
             }
         }
-
-        let _ = picked_up;
     }
 }
 
@@ -227,9 +298,8 @@ fn nest_food_deposit(
     config: Res<SimConfig>,
     mut colony_food: ResMut<ColonyFood>,
     mut ant_query: Query<
-        (Entity, &Transform, &mut Ant, &CarriedItem),
+        (Entity, &Transform, &mut Ant, &CarriedItem, &mut PositionHistory),
     >,
-    _nest_query: Query<&Transform, With<NestEntrance>>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -237,7 +307,7 @@ fn nest_food_deposit(
 
     let nest_pos = config.nest_position;
 
-    for (ant_entity, ant_transform, mut ant, carried) in &mut ant_query {
+    for (ant_entity, ant_transform, mut ant, carried, mut history) in &mut ant_query {
         if ant.state != AntState::Returning {
             continue;
         }
@@ -249,6 +319,7 @@ fn nest_food_deposit(
             colony_food.stored += carried.food_amount;
             commands.entity(ant_entity).remove::<CarriedItem>();
             ant.state = AntState::Foraging;
+            history.clear();
         }
     }
 }
@@ -274,17 +345,17 @@ fn ant_pheromone_deposit(
 
         match ant.state {
             AntState::Foraging => {
-                // Foragers leave HOME pheromone so returning ants can find the nest
-                grid.deposit(gx, gy, PheromoneType::Home, pconfig.deposit_amount, pconfig.max_intensity);
+                let amt = pconfig.deposit_amount(PheromoneType::Home);
+                grid.deposit(gx, gy, PheromoneType::Home, amt, pconfig.max_intensity);
             }
             AntState::Returning => {
-                // Returners leave FOOD pheromone so foragers can find food
-                let amount = if let Some(c) = carried {
-                    pconfig.deposit_amount * (1.0 + c.food_amount * 0.1)
+                let base = pconfig.deposit_amount(PheromoneType::Food);
+                let amt = if let Some(c) = carried {
+                    base * (1.0 + c.food_amount * 0.1)
                 } else {
-                    pconfig.deposit_amount
+                    base
                 };
-                grid.deposit(gx, gy, PheromoneType::Food, amount, pconfig.max_intensity);
+                grid.deposit(gx, gy, PheromoneType::Food, amt, pconfig.max_intensity);
             }
             _ => {}
         }
@@ -306,6 +377,19 @@ fn ant_movement(
         let velocity = movement.direction * movement.speed * dt;
         transform.translation.x += velocity.x;
         transform.translation.y += velocity.y;
+    }
+}
+
+fn record_position_history(
+    clock: Res<SimClock>,
+    mut query: Query<(&Transform, &mut PositionHistory), With<Ant>>,
+) {
+    if clock.speed == SimSpeed::Paused {
+        return;
+    }
+
+    for (transform, mut history) in &mut query {
+        history.record(transform.translation.truncate());
     }
 }
 
@@ -351,7 +435,7 @@ fn update_ant_visuals(
 ) {
     for (_ant, mut sprite, carried) in &mut query {
         if carried.is_some() {
-            sprite.color = Color::srgb(0.15, 0.5, 0.15);
+            sprite.color = Color::srgb(0.9, 0.4, 0.1);
         } else {
             sprite.color = Color::srgb(0.1, 0.1, 0.1);
         }

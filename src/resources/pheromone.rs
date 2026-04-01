@@ -4,19 +4,32 @@ use crate::components::pheromone::PheromoneType;
 
 #[derive(Resource)]
 pub struct PheromoneConfig {
-    pub evaporation_rate: f32,
+    /// Per-type evaporation rates, indexed by PheromoneType::index()
+    pub evaporation_rates: [f32; PheromoneType::COUNT],
     pub diffusion_rate: f32,
-    pub deposit_amount: f32,
+    /// Per-type base deposit amounts, indexed by PheromoneType::index()
+    pub deposit_amounts: [f32; PheromoneType::COUNT],
     pub max_intensity: f32,
+}
+
+impl PheromoneConfig {
+    pub fn evaporation_rate(&self, ptype: PheromoneType) -> f32 {
+        self.evaporation_rates[ptype.index()]
+    }
+
+    pub fn deposit_amount(&self, ptype: PheromoneType) -> f32 {
+        self.deposit_amounts[ptype.index()]
+    }
 }
 
 impl Default for PheromoneConfig {
     fn default() -> Self {
         Self {
-            evaporation_rate: 0.02,
+            //                      Home     Food     Alarm    Trail
+            evaporation_rates: [0.0005,  0.0002,  0.0005,  0.0005],
             diffusion_rate: 0.005,
-            deposit_amount: 1.0,
-            max_intensity: 100.0,
+            deposit_amounts:   [3.0,     8.0,     2.5,     2.5],
+            max_intensity: 200.0,
         }
     }
 }
@@ -80,11 +93,11 @@ impl PheromoneGrid {
         }
     }
 
-    pub fn evaporate(&mut self, rate: f32) {
-        let decay = 1.0 - rate;
+    pub fn evaporate(&mut self, rates: &[f32; PheromoneType::COUNT]) {
+        let decays: [f32; PheromoneType::COUNT] = std::array::from_fn(|i| 1.0 - rates[i]);
         for cell in &mut self.cells {
-            for val in cell.iter_mut() {
-                *val *= decay;
+            for (i, val) in cell.iter_mut().enumerate() {
+                *val *= decays[i];
                 if *val < 0.001 {
                     *val = 0.0;
                 }
@@ -141,15 +154,36 @@ impl PheromoneGrid {
         }
     }
 
-    /// Sample the 8 neighbors and return weighted direction toward highest concentration
-    pub fn sense_gradient(&self, x: usize, y: usize, ptype: PheromoneType) -> bevy::math::Vec2 {
+    /// Sample cells within `radius` and return weighted direction toward highest concentration.
+    /// `forward` is the ant's current heading — only cells within a forward cone are
+    /// considered, preventing ants from sensing their own trail behind them.
+    pub fn sense_gradient(
+        &self,
+        x: usize,
+        y: usize,
+        ptype: PheromoneType,
+        forward: bevy::math::Vec2,
+        radius: i32,
+    ) -> bevy::math::Vec2 {
         let mut gradient = bevy::math::Vec2::ZERO;
+        let fwd = if forward.length_squared() > 0.001 {
+            forward.normalize()
+        } else {
+            bevy::math::Vec2::X
+        };
 
-        for dy in -1i32..=1 {
-            for dx in -1i32..=1 {
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
                 if dx == 0 && dy == 0 {
                     continue;
                 }
+                let cell_dir = bevy::math::Vec2::new(dx as f32, dy as f32).normalize();
+                let dot = fwd.dot(cell_dir);
+
+                if dot < -0.25 {
+                    continue;
+                }
+
                 let nx = x as i32 + dx;
                 let ny = y as i32 + dy;
                 if nx >= 0
@@ -158,7 +192,13 @@ impl PheromoneGrid {
                     && (ny as usize) < self.height
                 {
                     let intensity = self.get(nx as usize, ny as usize, ptype);
-                    gradient += bevy::math::Vec2::new(dx as f32, dy as f32) * intensity;
+                    if intensity < 0.001 {
+                        continue;
+                    }
+                    let cone_weight = (dot + 0.25) / 1.25;
+                    let dist = ((dx * dx + dy * dy) as f32).sqrt();
+                    let dist_weight = 1.0 / (1.0 + dist);
+                    gradient += cell_dir * intensity * cone_weight * dist_weight;
                 }
             }
         }

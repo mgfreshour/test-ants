@@ -46,6 +46,62 @@ pub struct ColonyMember {
     pub colony_id: u32,
 }
 
+/// Ring buffer of recent positions so ants avoid backtracking.
+/// Stores the last N positions and exposes an anti-backtrack direction.
+const HISTORY_LEN: usize = 16;
+
+#[derive(Component)]
+pub struct PositionHistory {
+    buf: [Vec2; HISTORY_LEN],
+    idx: usize,
+    count: usize,
+}
+
+impl Default for PositionHistory {
+    fn default() -> Self {
+        Self {
+            buf: [Vec2::ZERO; HISTORY_LEN],
+            idx: 0,
+            count: 0,
+        }
+    }
+}
+
+impl PositionHistory {
+    pub fn record(&mut self, pos: Vec2) {
+        self.buf[self.idx] = pos;
+        self.idx = (self.idx + 1) % HISTORY_LEN;
+        if self.count < HISTORY_LEN {
+            self.count += 1;
+        }
+    }
+
+    /// Returns a unit vector pointing AWAY from the centroid of recent positions,
+    /// giving the ant forward momentum and preventing U-turns.
+    pub fn anti_backtrack(&self, current_pos: Vec2) -> Vec2 {
+        if self.count < 2 {
+            return Vec2::ZERO;
+        }
+        let mut centroid = Vec2::ZERO;
+        for i in 0..self.count {
+            centroid += self.buf[i];
+        }
+        centroid /= self.count as f32;
+
+        let away = current_pos - centroid;
+        if away.length_squared() > 0.1 {
+            away.normalize()
+        } else {
+            Vec2::ZERO
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.count = 0;
+        self.idx = 0;
+    }
+}
+
 #[derive(Component)]
 pub struct CarriedItem {
     pub food_amount: f32,

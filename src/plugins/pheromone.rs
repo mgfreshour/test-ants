@@ -85,7 +85,7 @@ fn pheromone_evaporate_diffuse(
         return;
     }
 
-    grid.evaporate(pconfig.evaporation_rate);
+    grid.evaporate(&pconfig.evaporation_rates);
     grid.diffuse(pconfig.diffusion_rate, pconfig.max_intensity);
 }
 

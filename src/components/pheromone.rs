@@ -23,7 +23,7 @@ impl PheromoneType {
     pub fn color(&self) -> Color {
         match self {
             PheromoneType::Home => Color::srgba(0.2, 0.4, 1.0, 0.7),
-            PheromoneType::Food => Color::srgba(0.2, 0.9, 0.2, 0.7),
+            PheromoneType::Food => Color::srgba(1.0, 0.6, 0.1, 0.7),
             PheromoneType::Alarm => Color::srgba(1.0, 0.2, 0.2, 0.7),
             PheromoneType::Trail => Color::srgba(1.0, 0.9, 0.1, 0.7),
         }

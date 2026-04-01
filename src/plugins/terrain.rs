@@ -63,14 +63,14 @@ fn spawn_food_sources(mut commands: Commands, config: Res<SimConfig>) {
     let margin = 150.0;
 
     let food_configs = [
-        (50.0, 18.0, Color::srgb(0.9, 0.7, 0.2)),  // large fruit
-        (50.0, 18.0, Color::srgb(0.85, 0.6, 0.15)),
-        (20.0, 12.0, Color::srgb(0.6, 0.3, 0.2)),   // dead insect
-        (20.0, 12.0, Color::srgb(0.55, 0.35, 0.2)),
-        (5.0, 6.0, Color::srgb(0.9, 0.85, 0.7)),    // crumbs
-        (5.0, 6.0, Color::srgb(0.85, 0.8, 0.65)),
-        (5.0, 6.0, Color::srgb(0.88, 0.82, 0.68)),
-        (5.0, 6.0, Color::srgb(0.92, 0.87, 0.72)),
+        (150.0, 18.0, Color::srgb(0.9, 0.7, 0.2)),  // large fruit
+        (150.0, 18.0, Color::srgb(0.85, 0.6, 0.15)),
+        (120.0, 12.0, Color::srgb(0.6, 0.3, 0.2)),   // dead insect
+        (120.0, 12.0, Color::srgb(0.55, 0.35, 0.2)),
+        (15.0, 6.0, Color::srgb(0.9, 0.85, 0.7)),    // crumbs
+        (15.0, 6.0, Color::srgb(0.85, 0.8, 0.65)),
+        (15.0, 6.0, Color::srgb(0.88, 0.82, 0.68)),
+        (15.0, 6.0, Color::srgb(0.92, 0.87, 0.72)),
     ];
 
     for (amount, size, color) in &food_configs {
