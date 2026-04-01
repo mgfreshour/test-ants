@@ -48,7 +48,7 @@ Do not test:
        Why: captures critical survival and economy interactions.
 10. [x] **W10 (P1/M)** Add unit tests for food pickup/deposit and state transitions.  
         Why: verifies main foraging loop correctness.
-11. [ ] **W11 (P1/M)** Add unit tests for pheromone decision/deposit logic by ant state.  
+11. [x] **W11 (P1/M)** Add unit tests for pheromone decision/deposit logic by ant state.  
         Why: prevents regressions in trail formation behavior.
 12. [ ] **W12 (P1/M)** Add unit tests for nest utility scoring outcomes under varied colony conditions.  
         Why: ensures assignment logic remains explainable and tunable.

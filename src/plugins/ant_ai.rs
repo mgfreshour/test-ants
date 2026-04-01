@@ -553,16 +553,21 @@ fn ant_pheromone_deposit(
         match ant.state {
             AntState::Foraging => {
                 let amt = pconfig.deposit_amount(PheromoneType::Home);
-                grid.deposit(gx, gy, PheromoneType::Home, amt, pconfig.max_intensity);
+                if let Some(dep) =
+                    ant_logic::home_pheromone_deposit_amount(ant.state == AntState::Foraging, amt)
+                {
+                    grid.deposit(gx, gy, PheromoneType::Home, dep, pconfig.max_intensity);
+                }
             }
             AntState::Returning => {
                 let base = pconfig.deposit_amount(PheromoneType::Food);
-                let amt = if let Some(c) = carried {
-                    base * (1.0 + c.food_amount * 0.1)
-                } else {
-                    base
-                };
-                grid.deposit(gx, gy, PheromoneType::Food, amt, pconfig.max_intensity);
+                if let Some(dep) = ant_logic::food_pheromone_deposit_amount(
+                    ant.state == AntState::Returning,
+                    base,
+                    carried.map(|c| c.food_amount),
+                ) {
+                    grid.deposit(gx, gy, PheromoneType::Food, dep, pconfig.max_intensity);
+                }
             }
             _ => {}
         }

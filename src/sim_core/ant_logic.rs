@@ -63,6 +63,26 @@ pub fn can_deposit_food(state_is_returning: bool, is_surface_ant: bool, distance
     state_is_returning && is_surface_ant && distance_to_portal < deposit_range
 }
 
+pub fn home_pheromone_deposit_amount(is_foraging: bool, base_amount: f32) -> Option<f32> {
+    if is_foraging {
+        Some(base_amount)
+    } else {
+        None
+    }
+}
+
+pub fn food_pheromone_deposit_amount(is_returning: bool, base_amount: f32, carried_food_amount: Option<f32>) -> Option<f32> {
+    if !is_returning {
+        return None;
+    }
+    let amount = if let Some(food) = carried_food_amount {
+        base_amount * (1.0 + food * 0.1)
+    } else {
+        base_amount
+    };
+    Some(amount)
+}
+
 pub fn apply_boundary_bounce(pos: Vec2, dir: Vec2, min: Vec2, max: Vec2) -> (Vec2, Vec2) {
     let mut next_pos = pos;
     let mut next_dir = dir;
@@ -146,5 +166,24 @@ mod tests {
         assert!(!can_deposit_food(true, false, 10.0, 30.0));
         assert!(!can_deposit_food(false, true, 10.0, 30.0));
         assert!(!can_deposit_food(true, true, 35.0, 30.0));
+    }
+
+    #[test]
+    fn pheromone_deposit_amounts_match_ant_state() {
+        assert_eq!(home_pheromone_deposit_amount(true, 2.0), Some(2.0));
+        assert_eq!(home_pheromone_deposit_amount(false, 2.0), None);
+
+        assert_eq!(
+            food_pheromone_deposit_amount(true, 1.5, Some(5.0)),
+            Some(2.25)
+        );
+        assert_eq!(
+            food_pheromone_deposit_amount(true, 1.5, None),
+            Some(1.5)
+        );
+        assert_eq!(
+            food_pheromone_deposit_amount(false, 1.5, Some(5.0)),
+            None
+        );
     }
 }
