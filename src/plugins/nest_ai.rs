@@ -1001,9 +1001,9 @@ fn nest_task_advance(
                                 .find(|(_, cb)| cb.0 == entity);
 
                             if let Some((food_e, _)) = carried {
-                                // Transfer food to queen — boost her satiation.
+                                // Transfer food to queen — partially refill her satiation reserve.
                                 if let Ok(mut hunger) = queen_hunger_query.get_single_mut() {
-                                    hunger.satiation = (hunger.satiation + 1.0).min(2.0);
+                                    hunger.satiation = (hunger.satiation + 0.25).min(1.0);
                                 }
                                 commands.entity(food_e).despawn();
                                 colony_food.stored -= 1.0;

@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use rand::Rng;
 
 use crate::components::ant::{
-    Ant, AntState, CarriedItem, ColonyMember, Follower, Health, Movement, PlayerControlled,
+    Ant, AntState, CarriedItem, ColonyMember, Health, Movement, PlayerControlled,
     PositionHistory, TrailSense,
 };
 use crate::components::map::MapId;
@@ -231,7 +231,7 @@ fn alarm_response_steering(
     grids: Option<Res<ColonyPheromones>>,
     mut query: Query<
         (&Transform, &ColonyMember, &mut Movement, &mut Ant, &mut TrailSense),
-        (Without<PlayerControlled>, Without<Follower>, Without<CarriedItem>),
+        (Without<PlayerControlled>, Without<CarriedItem>),
     >,
 ) {
     if clock.speed == SimSpeed::Paused {

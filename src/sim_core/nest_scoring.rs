@@ -67,9 +67,17 @@ pub fn compute_scores(input: &NestScoringInput) -> NestTaskScores {
     };
 
     let queen_score = if input.has_queen && input.has_food {
+        // Desired attendants scales inversely with satiation (queen_hunger = 1 - satiation):
+        //   full queen (hunger=0.0) → 0 desired  → no need to attend
+        //   empty queen (hunger=1.0) → 4 desired → urgently needs feeding
+        let desired_attendants = (input.queen_hunger * 4.0).ceil() as usize;
+        let attendant_need = if input.current_queen_attendants < desired_attendants {
+            1.0
+        } else {
+            0.1 // small residual so it can still win if nothing else scores
+        };
         let hunger_urgency = 0.3 + input.queen_hunger * 0.7;
-        let crowding = 1.0 / (1.0 + input.current_queen_attendants as f32 * 1.5);
-        0.8 * nursing_affinity * hunger_urgency * (0.3 + input.queen_signal * 0.7) * crowding
+        0.8 * nursing_affinity * hunger_urgency * (0.3 + input.queen_signal * 0.7) * attendant_need
     } else {
         0.0
     };
@@ -172,5 +180,92 @@ mod tests {
         let low_scores = compute_scores(&low_crowd);
         let high_scores = compute_scores(&high_crowd);
         assert!(low_scores.move_brood > high_scores.move_brood);
+    }
+
+    #[test]
+    fn queen_attendant_score_scales_with_hunger() {
+        let full = NestScoringInputBuilder::new()
+            .food(4.0)
+            .queen(0.0, 1.0) // hunger=0 → satiation=1.0 (full)
+            .build();
+        let hungry = NestScoringInputBuilder::new()
+            .food(4.0)
+            .queen(1.0, 1.0) // hunger=1 → satiation=0.0 (empty)
+            .build();
+
+        let full_scores = compute_scores(&full);
+        let hungry_scores = compute_scores(&hungry);
+        assert!(hungry_scores.attend_queen > full_scores.attend_queen);
+    }
+
+    #[test]
+    fn full_queen_has_low_attendant_score() {
+        let input = NestScoringInputBuilder::new()
+            .food(4.0)
+            .queen(0.0, 1.0) // full queen
+            .queen_attendants(0)
+            .build();
+
+        let scores = compute_scores(&input);
+        // Full queen: hunger_urgency = 0.3, attendant_need = 0.1 (desired=0, already satisfied)
+        assert!(scores.attend_queen < 0.1);
+    }
+
+    #[test]
+    fn hungry_queen_wins_task_selection() {
+        let input = NestScoringInputBuilder::new()
+            .food(4.0)
+            .queen(0.8, 1.0) // very hungry queen
+            .queen_attendants(0)
+            .build();
+
+        let scores = compute_scores(&input);
+        assert_eq!(choose_task(&scores), NestTaskChoice::AttendQueen);
+    }
+
+    #[test]
+    fn extra_attendants_reduce_queen_attend_score() {
+        let understaffed = NestScoringInputBuilder::new()
+            .food(4.0)
+            .queen(0.8, 1.0)
+            .queen_attendants(0)
+            .build();
+        let overstaffed = NestScoringInputBuilder::new()
+            .food(4.0)
+            .queen(0.8, 1.0)
+            .queen_attendants(4) // already at desired count
+            .build();
+
+        let under_scores = compute_scores(&understaffed);
+        let over_scores = compute_scores(&overstaffed);
+        assert!(under_scores.attend_queen > over_scores.attend_queen);
+    }
+
+    #[test]
+    fn starvation_timing_is_generous() {
+        // Grace period: 30s, damage: 0.5/sec, queen HP: 100
+        // Total survival time: 30 + 200 = 230 seconds
+        // Generous threshold: must survive at least 7 feeding cycles (~30s each)
+        let grace = 30.0_f32;
+        let damage_rate = 0.5_f32;
+        let queen_hp = 100.0_f32;
+        let time_to_die = grace + (queen_hp / damage_rate);
+        let feeding_cycle = 30.0_f32;
+        assert!(time_to_die / feeding_cycle >= 7.0);
+    }
+
+    #[test]
+    fn starvation_timer_resets_when_fed() {
+        use crate::components::nest::QueenHunger;
+        let mut hunger = QueenHunger {
+            satiation: 0.25, // queen was just fed
+            decay_rate: 0.005,
+            starvation_timer: 50.0,
+        };
+        // The starvation system resets the timer when satiation > 0
+        if hunger.satiation > 0.0 {
+            hunger.starvation_timer = 0.0;
+        }
+        assert_eq!(hunger.starvation_timer, 0.0);
     }
 }

@@ -19,6 +19,7 @@ pub enum OverlayDisplay {
     Food,
     Alarm,
     Trail,
+    Recruit,
 }
 
 impl Default for OverlayState {
@@ -90,7 +91,7 @@ fn pheromone_evaporate_diffuse(
     }
 
     grids.evaporate_all(&pconfig.evaporation_rates);
-    grids.diffuse_all(pconfig.diffusion_rate, pconfig.max_intensity);
+    grids.diffuse_all(&pconfig.diffusion_rates, pconfig.max_intensity);
 }
 
 fn toggle_overlay(input: Res<ButtonInput<KeyCode>>, mut state: ResMut<OverlayState>) {
@@ -104,7 +105,8 @@ fn toggle_overlay(input: Res<ButtonInput<KeyCode>>, mut state: ResMut<OverlaySta
                 OverlayDisplay::Home => OverlayDisplay::Food,
                 OverlayDisplay::Food => OverlayDisplay::Alarm,
                 OverlayDisplay::Alarm => OverlayDisplay::Trail,
-                OverlayDisplay::Trail => {
+                OverlayDisplay::Trail => OverlayDisplay::Recruit,
+                OverlayDisplay::Recruit => {
                     state.visible = false;
                     OverlayDisplay::All
                 }
@@ -140,10 +142,11 @@ fn update_overlay_visuals(
                 let food = values[PheromoneType::Food.index()] / max;
                 let alarm = values[PheromoneType::Alarm.index()] / max;
                 let trail = values[PheromoneType::Trail.index()] / max;
+                let recruit = values[PheromoneType::Recruit.index()] / max;
                 let r = alarm + trail * 0.8;
-                let g = food + trail * 0.7;
-                let b = home;
-                let total = home + food + alarm + trail;
+                let g = food + trail * 0.7 + recruit * 0.9;
+                let b = home + recruit;
+                let total = home + food + alarm + trail + recruit;
                 (r, g, b, total)
             }
             OverlayDisplay::Home => {
@@ -161,6 +164,10 @@ fn update_overlay_visuals(
             OverlayDisplay::Trail => {
                 let v = values[PheromoneType::Trail.index()] / max;
                 (v, 0.9 * v, 0.1 * v, v)
+            }
+            OverlayDisplay::Recruit => {
+                let v = values[PheromoneType::Recruit.index()] / max;
+                (0.3 * v, 0.9 * v, v, v)
             }
         };
 

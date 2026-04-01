@@ -67,20 +67,23 @@ pub struct NestTile {
 pub struct Queen;
 
 /// Tracks how recently the queen has been fed.
-/// Satiation decays over time; egg laying requires satiation > 0.
+/// Satiation fills when fed; each egg costs 0.2 satiation (5 eggs at full).
 #[derive(Component)]
 pub struct QueenHunger {
-    /// Current satiation level (0.0 = starving, max ~1.0 after a feeding).
+    /// Current satiation level (0.0 = starving, 1.0 = full).
     pub satiation: f32,
-    /// Rate at which satiation decays per second.
+    /// Rate at which satiation decays per second (very slow; ants drive feeding).
     pub decay_rate: f32,
+    /// Time spent at 0 satiation; used to trigger starvation damage after a grace period.
+    pub starvation_timer: f32,
 }
 
 impl Default for QueenHunger {
     fn default() -> Self {
         Self {
-            satiation: 0.5, // start partially fed so first egg can happen quickly
-            decay_rate: 0.04, // ~25 seconds to go from 1.0 to 0.0
+            satiation: 1.0,       // start full so first eggs can happen immediately
+            decay_rate: 0.005,    // ~200 seconds to go from 1.0 to 0.0
+            starvation_timer: 0.0,
         }
     }
 }

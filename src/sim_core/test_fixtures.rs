@@ -68,6 +68,11 @@ impl NestScoringInputBuilder {
         self
     }
 
+    pub fn queen_attendants(mut self, count: usize) -> Self {
+        self.input.current_queen_attendants = count;
+        self
+    }
+
     pub fn build(self) -> NestScoringInput {
         self.input
     }

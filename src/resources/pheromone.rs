@@ -6,7 +6,8 @@ use crate::components::pheromone::PheromoneType;
 pub struct PheromoneConfig {
     /// Per-type evaporation rates, indexed by PheromoneType::index()
     pub evaporation_rates: [f32; PheromoneType::COUNT],
-    pub diffusion_rate: f32,
+    /// Per-type diffusion rates, indexed by PheromoneType::index()
+    pub diffusion_rates: [f32; PheromoneType::COUNT],
     /// Per-type base deposit amounts, indexed by PheromoneType::index()
     pub deposit_amounts: [f32; PheromoneType::COUNT],
     pub max_intensity: f32,
@@ -17,6 +18,10 @@ impl PheromoneConfig {
         self.evaporation_rates[ptype.index()]
     }
 
+    pub fn diffusion_rate(&self, ptype: PheromoneType) -> f32 {
+        self.diffusion_rates[ptype.index()]
+    }
+
     pub fn deposit_amount(&self, ptype: PheromoneType) -> f32 {
         self.deposit_amounts[ptype.index()]
     }
@@ -25,10 +30,10 @@ impl PheromoneConfig {
 impl Default for PheromoneConfig {
     fn default() -> Self {
         Self {
-            //                      Home     Food     Alarm    Trail
-            evaporation_rates: [0.0002,  0.002,  0.05,  0.05],
-            diffusion_rate: 0.005,
-            deposit_amounts:   [3.0,     8.0,     2.5,     2.5],
+            //                        Home     Food     Alarm    Trail    Recruit
+            evaporation_rates:    [0.0002,  0.002,   0.05,    0.05,    0.01],
+            diffusion_rates:      [0.005,   0.005,   0.005,   0.005,   0.04],
+            deposit_amounts:      [3.0,     8.0,     2.5,     2.5,     15.0],
             max_intensity: 200.0,
         }
     }
@@ -93,6 +98,13 @@ impl PheromoneGrid {
         }
     }
 
+    pub fn clear_type(&mut self, x: usize, y: usize, ptype: PheromoneType) {
+        if x < self.width && y < self.height {
+            let idx = self.index(x, y);
+            self.cells[idx][ptype.index()] = 0.0;
+        }
+    }
+
     pub fn evaporate(&mut self, rates: &[f32; PheromoneType::COUNT]) {
         let decays: [f32; PheromoneType::COUNT] = std::array::from_fn(|i| 1.0 - rates[i]);
         for cell in &mut self.cells {
@@ -105,7 +117,7 @@ impl PheromoneGrid {
         }
     }
 
-    pub fn diffuse(&mut self, rate: f32, max: f32) {
+    pub fn diffuse(&mut self, rates: &[f32; PheromoneType::COUNT], max: f32) {
         let len = self.cells.len();
         let mut deltas = vec![[0.0f32; PheromoneType::COUNT]; len];
 
@@ -141,7 +153,7 @@ impl PheromoneGrid {
                 if neighbor_count > 0 {
                     for i in 0..PheromoneType::COUNT {
                         let avg = neighbor_sum[i] / neighbor_count as f32;
-                        deltas[idx][i] = rate * (avg - cell[i]);
+                        deltas[idx][i] = rates[i] * (avg - cell[i]);
                     }
                 }
             }
@@ -248,9 +260,9 @@ impl ColonyPheromones {
         }
     }
 
-    pub fn diffuse_all(&mut self, rate: f32, max: f32) {
+    pub fn diffuse_all(&mut self, rates: &[f32; PheromoneType::COUNT], max: f32) {
         for grid in self.grids.values_mut() {
-            grid.diffuse(rate, max);
+            grid.diffuse(rates, max);
         }
     }
 

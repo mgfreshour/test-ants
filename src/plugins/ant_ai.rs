@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::ant::{Ant, AntState, CarriedItem, ColonyMember, Follower, Health, Movement, PlayerControlled, PositionHistory, TrailSense};
+use crate::components::ant::{Ant, AntState, CarriedItem, ColonyMember, Health, Movement, PlayerControlled, PositionHistory, TrailSense};
 use crate::components::map::{MapId, MapMarker, MapPortal};
 use crate::components::nest::FoodEntity;
 
@@ -47,6 +47,7 @@ impl Plugin for AntAiPlugin {
                     surface_ant_nest_feeding,
                     fix_orphaned_returners,
                     ant_forage_steering,
+                    ant_follow_recruit_steering,
                     ant_return_steering,
                     food_detection_and_pickup,
                     nest_food_deposit,
@@ -112,6 +113,10 @@ const TRAIL_EPOCH_RATE: f32 = 0.33; // re-evaluate roughly every 3 seconds
 /// Minimum local pheromone intensity for an ant to sense a trail at all.
 /// Below this the concentration is too faint to follow, even if a gradient exists.
 const MIN_SENSE_INTENSITY: f32 = 1.5;
+/// Minimum Recruit pheromone intensity for an ant to start following.
+const RECRUIT_SENSE_THRESHOLD: f32 = 0.8;
+/// Recruit gradient weight when steering followers.
+const RECRUIT_GRADIENT_WEIGHT: f32 = 2.0;
 
 /// Increase hunger over time. Hungry ants slow down; starving ants take damage.
 /// Ants carrying food can self-feed when hunger gets high enough.
@@ -233,12 +238,13 @@ fn should_follow_trail(entity: Entity, elapsed: f32) -> bool {
 
 /// Foraging ants: follow FOOD pheromone gradient or random walk, biased away from HOME.
 /// Within SENSE_RANGE of a food source, head straight for it.
+/// If Recruit pheromone is detected, switch to Following state.
 fn ant_forage_steering(
     clock: Res<SimClock>,
     config: Res<SimConfig>,
     grids: Option<Res<ColonyPheromones>>,
     food_query: Query<&Transform, With<FoodSource>>,
-    mut query: Query<(Entity, &Transform, &mut Movement, &Ant, &ColonyMember, &PositionHistory, &mut TrailSense), (Without<CarriedItem>, Without<PlayerControlled>, Without<Follower>)>,
+    mut query: Query<(Entity, &Transform, &mut Movement, &mut Ant, &ColonyMember, &PositionHistory, &mut TrailSense), (Without<CarriedItem>, Without<PlayerControlled>)>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -247,13 +253,26 @@ fn ant_forage_steering(
     let mut rng = rand::thread_rng();
     let noise = config.exploration_noise;
 
-    for (entity, transform, mut movement, ant, colony, history, mut sense) in &mut query {
+    for (entity, transform, mut movement, mut ant, colony, history, mut sense) in &mut query {
         if ant.state != AntState::Foraging {
             continue;
         }
 
         let pos = transform.translation.truncate();
         let fwd = movement.direction;
+
+        // Check for Recruit pheromone — if strong enough, switch to Following
+        if let Some(ref all_grids) = grids {
+            if let Some(grid) = all_grids.get(colony.colony_id) {
+                if let Some((gx, gy)) = grid.world_to_grid(pos) {
+                    let recruit_local = grid.get(gx, gy, PheromoneType::Recruit);
+                    if recruit_local >= RECRUIT_SENSE_THRESHOLD {
+                        ant.state = AntState::Following;
+                        continue;
+                    }
+                }
+            }
+        }
 
         let mut nearest_food: Option<(f32, Vec2)> = None;
         for food_tf in &food_query {
@@ -318,6 +337,65 @@ fn ant_forage_steering(
             new_dir = perturbed_fwd;
         }
         movement.direction = new_dir;
+    }
+}
+
+/// Following ants: steer along the Recruit pheromone gradient toward the player.
+/// When the pheromone fades below threshold, revert to Foraging.
+fn ant_follow_recruit_steering(
+    clock: Res<SimClock>,
+    grids: Option<Res<ColonyPheromones>>,
+    mut query: Query<(&Transform, &mut Movement, &mut Ant, &ColonyMember, &mut TrailSense), Without<PlayerControlled>>,
+) {
+    if clock.speed == SimSpeed::Paused {
+        return;
+    }
+
+    let mut rng = rand::thread_rng();
+
+    for (transform, mut movement, mut ant, colony, mut sense) in &mut query {
+        if ant.state != AntState::Following {
+            continue;
+        }
+
+        let pos = transform.translation.truncate();
+        let fwd = movement.direction;
+
+        let mut has_signal = false;
+
+        if let Some(ref all_grids) = grids {
+            if let Some(grid) = all_grids.get(colony.colony_id) {
+                if let Some((gx, gy)) = grid.world_to_grid(pos) {
+                    let local = grid.get(gx, gy, PheromoneType::Recruit);
+                    if local >= RECRUIT_SENSE_THRESHOLD * 0.5 {
+                        has_signal = true;
+                        let grad = grid.sense_gradient(
+                            gx, gy, PheromoneType::Recruit, fwd, PHERO_SENSE_RADIUS + 2,
+                        );
+                        if grad.length_squared() > 0.001 {
+                            let jitter = Vec2::new(
+                                rng.gen_range(-0.1..0.1),
+                                rng.gen_range(-0.1..0.1),
+                            );
+                            let new_dir = (grad.normalize() * RECRUIT_GRADIENT_WEIGHT
+                                + fwd * 0.3
+                                + jitter)
+                                .normalize_or_zero();
+                            if new_dir != Vec2::ZERO {
+                                movement.direction = new_dir;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if has_signal {
+            *sense = TrailSense::FollowingTrail;
+        } else {
+            ant.state = AntState::Foraging;
+            *sense = TrailSense::Searching;
+        }
     }
 }
 

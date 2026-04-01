@@ -15,13 +15,14 @@ use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 
 pub struct NestPlugin;
 
-#[derive(Component)]
-struct FoodStorageIndicator {
-    index: usize,
-}
 
 const QUEEN_EGG_INTERVAL: f32 = 10.0;
-const QUEEN_FOOD_COST: f32 = 2.0;
+/// Satiation consumed per egg (5 eggs from a full queen).
+const EGG_SATIATION_COST: f32 = 0.2;
+/// Grace period at 0 satiation before starvation damage starts.
+const STARVATION_GRACE_PERIOD: f32 = 30.0;
+/// Health lost per second after grace period expires.
+const STARVATION_DAMAGE_RATE: f32 = 0.5;
 
 /// Default nest-view camera scale.
 const NEST_CAMERA_SCALE: f32 = 0.7;
@@ -43,7 +44,7 @@ impl Plugin for NestPlugin {
             .add_systems(PreStartup, setup_maps)
             .add_systems(
                 Startup,
-                (render_nest, spawn_queen, spawn_food_indicators).after(setup_maps),
+                (render_nest, spawn_queen).after(setup_maps),
             )
             .add_systems(
                 Update,
@@ -51,10 +52,10 @@ impl Plugin for NestPlugin {
                     cycle_map_view,
                     sync_map_visibility,
                     queen_hunger_decay,
+                    queen_starvation_damage.after(queen_hunger_decay),
                     queen_egg_laying,
                     brood_development,
                     update_colony_stats,
-                    update_food_indicators,
                 ),
             );
     }
@@ -154,32 +155,6 @@ fn spawn_queen(mut commands: Commands, registry: Res<MapRegistry>, mut meshes: R
     ));
 }
 
-fn spawn_food_indicators(
-    mut commands: Commands,
-    registry: Res<MapRegistry>,
-    map_query: Query<&NestGrid, With<MapMarker>>,
-) {
-    let Ok(grid) = map_query.get(registry.player_nest) else { return };
-    let food_cells = find_chamber_cells(grid, ChamberKind::FoodStorage);
-    let capacity = food_cells.len().min(12);
-
-    for (idx, &(gx, gy)) in food_cells.iter().take(capacity).enumerate() {
-        let pos = nest_grid_to_world(gx, gy);
-
-        commands.spawn((
-            Sprite {
-                color: Color::srgba(0.6, 0.8, 0.2, 0.0),
-                custom_size: Some(Vec2::splat(NEST_CELL_SIZE * 0.6)),
-                ..default()
-            },
-            Transform::from_xyz(pos.x, pos.y, 1.5),
-            Visibility::Hidden,
-            MapId(registry.player_nest),
-            FoodStorageIndicator { index: idx },
-        ));
-    }
-}
-
 // ── View cycling ─────────────────────────────────────────────────────
 
 /// Tab cycles through all maps in `MapRegistry.maps`, saving/restoring camera.
@@ -273,64 +248,24 @@ fn queen_egg_laying(
     time: Res<Time>,
     registry: Res<MapRegistry>,
     mut commands: Commands,
-    mut food_query: Query<&mut ColonyFood, With<MapMarker>>,
     map_grid_query: Query<&NestGrid, With<MapMarker>>,
-    mut stack_query: Query<&mut crate::resources::nest::TileStackRegistry, With<MapMarker>>,
-    food_entity_query: Query<(Entity, &Transform, &crate::components::nest::FoodEntity, &crate::components::nest::StackedItem)>,
-    queen_query: Query<&QueenHunger, With<Queen>>,
+    mut queen_query: Query<&mut QueenHunger, With<Queen>>,
     mut egg_timer: Local<f32>,
 ) {
-    let Ok(hunger) = queen_query.get_single() else { return };
+    let Ok(mut hunger) = queen_query.get_single_mut() else { return };
     if clock.speed == SimSpeed::Paused {
         return;
     }
 
-    let Ok(mut colony_food) = food_query.get_mut(registry.player_nest) else { return };
     let Ok(grid) = map_grid_query.get(registry.player_nest) else { return };
 
     let dt = time.delta_secs() * clock.speed.multiplier();
     *egg_timer += dt;
 
-    // Queen must be fed (satiation > 0) and colony must have enough stored food.
-    if *egg_timer >= QUEEN_EGG_INTERVAL && colony_food.stored >= QUEEN_FOOD_COST && hunger.satiation > 0.0 {
-        // Consume 2 nearest food entities from storage
-        let Ok(mut stack_registry) = stack_query.get_mut(registry.player_nest) else { return };
-
-        let mut to_despawn = Vec::new();
-        let mut consumed = 0.0;
-
-        let mut storage_food: Vec<_> = food_entity_query
-            .iter()
-            .filter(|(_, _, _, stacked)| {
-                grid.get(stacked.grid_pos.0, stacked.grid_pos.1) == CellType::Chamber(ChamberKind::FoodStorage)
-            })
-            .collect();
-
-        // Sort by distance (consume nearest first)
-        storage_food.sort_by_key(|(_, tf, _, _)| {
-            (tf.translation.truncate().distance(Vec2::ZERO) * 100.0) as i32
-        });
-
-        for (e, _, food, stacked) in storage_food {
-            if consumed >= QUEEN_FOOD_COST { break; }
-            consumed += food.amount;
-            stack_registry.remove(stacked.grid_pos, e);
-            to_despawn.push(e);
-        }
-
-        if consumed < QUEEN_FOOD_COST {
-            // Not enough food entities, abort laying (don't decrement timer)
-            return;
-        }
-
-        // Successfully found enough food, commit to laying egg
+    // Queen lays an egg when the timer fires and she has enough satiation reserves.
+    if *egg_timer >= QUEEN_EGG_INTERVAL && hunger.satiation >= EGG_SATIATION_COST {
         *egg_timer -= QUEEN_EGG_INTERVAL;
-
-        for e in to_despawn {
-            commands.entity(e).despawn();
-        }
-
-        colony_food.stored -= QUEEN_FOOD_COST;
+        hunger.satiation -= EGG_SATIATION_COST;
 
         let mut rng = rand::thread_rng();
         let queen_cells = find_chamber_cells(grid, ChamberKind::Queen);
@@ -356,6 +291,28 @@ fn queen_egg_laying(
             Brood::new_egg(),
             MapId(registry.player_nest),
         ));
+    }
+}
+
+fn queen_starvation_damage(
+    clock: Res<SimClock>,
+    time: Res<Time>,
+    mut queen_query: Query<(&mut QueenHunger, &mut Health), With<Queen>>,
+) {
+    if clock.speed == SimSpeed::Paused {
+        return;
+    }
+    let dt = time.delta_secs() * clock.speed.multiplier();
+
+    for (mut hunger, mut health) in &mut queen_query {
+        if hunger.satiation <= 0.0 {
+            hunger.starvation_timer += dt;
+            if hunger.starvation_timer >= STARVATION_GRACE_PERIOD {
+                health.current = (health.current - STARVATION_DAMAGE_RATE * dt).max(0.0);
+            }
+        } else {
+            hunger.starvation_timer = 0.0;
+        }
     }
 }
 
@@ -476,28 +433,6 @@ fn update_colony_stats(
             BroodStage::Egg => stats.eggs += 1,
             BroodStage::Larva => stats.larvae += 1,
             BroodStage::Pupa => stats.pupae += 1,
-        }
-    }
-}
-
-fn update_food_indicators(
-    registry: Res<MapRegistry>,
-    food_query: Query<&ColonyFood, With<MapMarker>>,
-    mut query: Query<(&FoodStorageIndicator, &mut Sprite)>,
-) {
-    let Ok(colony_food) = food_query.get(registry.player_nest) else { return };
-    let food = colony_food.stored;
-    let food_per_slot = 5.0;
-
-    for (indicator, mut sprite) in &mut query {
-        let threshold = indicator.index as f32 * food_per_slot;
-        if food > threshold + food_per_slot {
-            sprite.color = Color::srgba(0.55, 0.75, 0.15, 0.85);
-        } else if food > threshold {
-            let frac = (food - threshold) / food_per_slot;
-            sprite.color = Color::srgba(0.55, 0.75, 0.15, frac * 0.85);
-        } else {
-            sprite.color = Color::srgba(0.55, 0.75, 0.15, 0.0);
         }
     }
 }

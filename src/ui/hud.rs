@@ -102,6 +102,7 @@ fn update_hud(
                     OverlayDisplay::Food => "Food",
                     OverlayDisplay::Alarm => "Alarm",
                     OverlayDisplay::Trail => "Trail",
+                    OverlayDisplay::Recruit => "Recruit",
                 }
             } else {
                 "Off"
@@ -118,7 +119,7 @@ fn update_hud(
 
             **text = format!(
                 "[{}] Pop:{} Brood:{}  |  Food:{:.0}  |  Forage:{} Ret:{} Follow:{}  |  {}  |  Overlay:{}  |  FPS:{:.0}{}\n\
-                 WASD:move E:pick Q:drop Shift:trail R:recruit T:dismiss X:swap F:cam/ant Tab:nest",
+                 WASD:move E:pick Q:drop Shift:trail R(hold):recruit T:dismiss X:swap F:feed Tab:nest",
                 mode_str,
                 pop, brood,
                 food_stored,

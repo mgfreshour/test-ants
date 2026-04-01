@@ -6,10 +6,11 @@ pub enum PheromoneType {
     Food,
     Alarm,
     Trail,
+    Recruit,
 }
 
 impl PheromoneType {
-    pub const COUNT: usize = 4;
+    pub const COUNT: usize = 5;
 
     pub fn index(&self) -> usize {
         match self {
@@ -17,6 +18,7 @@ impl PheromoneType {
             PheromoneType::Food => 1,
             PheromoneType::Alarm => 2,
             PheromoneType::Trail => 3,
+            PheromoneType::Recruit => 4,
         }
     }
 
@@ -26,6 +28,7 @@ impl PheromoneType {
             PheromoneType::Food => Color::srgba(1.0, 0.6, 0.1, 0.7),
             PheromoneType::Alarm => Color::srgba(1.0, 0.2, 0.2, 0.7),
             PheromoneType::Trail => Color::srgba(1.0, 0.9, 0.1, 0.7),
+            PheromoneType::Recruit => Color::srgba(0.3, 0.9, 1.0, 0.7),
         }
     }
 }

@@ -1,8 +1,7 @@
 use bevy::prelude::*;
-use rand::Rng;
 
 use crate::components::ant::{
-    Ant, AntState, CarriedItem, Caste, ColonyMember, Movement, PlayerControlled, PositionHistory,
+    Ant, AntState, CarriedItem, ColonyMember, Movement, PlayerControlled,
 };
 use crate::components::map::{MapId, MapMarker};
 use crate::components::pheromone::PheromoneType;
@@ -12,6 +11,9 @@ use crate::plugins::camera::MainCamera;
 use crate::resources::active_map::{MapRegistry, viewing_surface};
 use crate::resources::pheromone::{ColonyPheromones, PheromoneConfig};
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
+
+/// Radius (in grid cells) around the player where Recruit pheromone is deposited
+const RECRUIT_DEPOSIT_RADIUS: i32 = 3;
 
 pub struct PlayerPlugin;
 
@@ -35,9 +37,7 @@ pub struct FollowerCount(pub usize);
 
 const PLAYER_COLOR: Color = Color::srgb(1.0, 0.9, 0.2);
 const PLAYER_CARRY_COLOR: Color = Color::srgb(1.0, 0.6, 0.0);
-const RECRUIT_RADIUS: f32 = 100.0;
 const PICKUP_RANGE: f32 = 25.0;
-const FOLLOW_DISTANCE: f32 = 30.0;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
@@ -48,7 +48,6 @@ impl Plugin for PlayerPlugin {
                 Update,
                 (
                     designate_player_ant,
-                    follower_steering,
                     update_follower_count,
                 ),
             )
@@ -61,8 +60,8 @@ impl Plugin for PlayerPlugin {
                     player_drop,
                     player_regurgitate,
                     player_pheromone,
-                    player_recruit,
-                    player_dismiss,
+                    player_recruit_pheromone,
+                    player_dismiss_pheromone,
                     exchange_ant,
                     camera_follow_player,
                     update_player_visual,
@@ -274,52 +273,81 @@ fn player_pheromone(
     }
 }
 
-fn player_recruit(
+/// Hold R to deposit Recruit pheromone in a wide area around the player.
+/// Nearby ants will sense the gradient and follow it toward the player.
+fn player_recruit_pheromone(
+    clock: Res<SimClock>,
     input: Res<ButtonInput<KeyCode>>,
     mode: Res<PlayerMode>,
-    mut commands: Commands,
-    player_query: Query<&Transform, With<PlayerControlled>>,
-    ant_query: Query<
-        (Entity, &Transform, &Ant),
-        (Without<PlayerControlled>, Without<CarriedItem>),
-    >,
+    pconfig: Res<PheromoneConfig>,
+    mut grids: Option<ResMut<ColonyPheromones>>,
+    query: Query<(&Transform, &ColonyMember), With<PlayerControlled>>,
 ) {
-    if !mode.controlling || !input.just_pressed(KeyCode::KeyR) {
+    if !mode.controlling || clock.speed == SimSpeed::Paused {
         return;
     }
 
-    let Ok(player_tf) = player_query.get_single() else {
+    if !input.pressed(KeyCode::KeyR) {
+        return;
+    }
+
+    let Ok((transform, colony)) = query.get_single() else {
         return;
     };
 
-    let player_pos = player_tf.translation.truncate();
-    let mut recruited = 0;
+    let Some(ref mut all_grids) = grids else { return };
+    let Some(grid) = all_grids.get_mut(colony.colony_id) else {
+        return;
+    };
+    let pos = transform.translation.truncate();
+    let Some((cx, cy)) = grid.world_to_grid(pos) else {
+        return;
+    };
 
-    for (entity, tf, ant) in &ant_query {
-        if ant.state == AntState::Following {
-            continue;
-        }
-        let dist = player_pos.distance(tf.translation.truncate());
-        if dist < RECRUIT_RADIUS && recruited < 8 {
-            commands.entity(entity).insert(crate::components::ant::Follower);
-            recruited += 1;
+    let amt = pconfig.deposit_amount(PheromoneType::Recruit);
+    for dy in -RECRUIT_DEPOSIT_RADIUS..=RECRUIT_DEPOSIT_RADIUS {
+        for dx in -RECRUIT_DEPOSIT_RADIUS..=RECRUIT_DEPOSIT_RADIUS {
+            let gx = cx as i32 + dx;
+            let gy = cy as i32 + dy;
+            if gx >= 0 && gy >= 0 && (gx as usize) < grid.width && (gy as usize) < grid.height {
+                let dist = ((dx * dx + dy * dy) as f32).sqrt();
+                let falloff = 1.0 / (1.0 + dist);
+                grid.deposit(
+                    gx as usize,
+                    gy as usize,
+                    PheromoneType::Recruit,
+                    amt * falloff,
+                    pconfig.max_intensity,
+                );
+            }
         }
     }
 }
 
-fn player_dismiss(
+/// Press T to clear all Recruit pheromone for this colony, dismissing followers.
+fn player_dismiss_pheromone(
     input: Res<ButtonInput<KeyCode>>,
     mode: Res<PlayerMode>,
-    mut commands: Commands,
-    mut query: Query<(Entity, &mut Ant), With<crate::components::ant::Follower>>,
+    mut grids: Option<ResMut<ColonyPheromones>>,
+    query: Query<&ColonyMember, With<PlayerControlled>>,
 ) {
     if !mode.controlling || !input.just_pressed(KeyCode::KeyT) {
         return;
     }
 
-    for (entity, mut ant) in &mut query {
-        ant.state = AntState::Foraging;
-        commands.entity(entity).remove::<crate::components::ant::Follower>();
+    let Ok(colony) = query.get_single() else {
+        return;
+    };
+
+    let Some(ref mut all_grids) = grids else { return };
+    let Some(grid) = all_grids.get_mut(colony.colony_id) else {
+        return;
+    };
+
+    for y in 0..grid.height {
+        for x in 0..grid.width {
+            grid.clear_type(x, y, PheromoneType::Recruit);
+        }
     }
 }
 
@@ -359,51 +387,11 @@ fn exchange_ant(
     }
 }
 
-fn follower_steering(
-    clock: Res<SimClock>,
-    time: Res<Time>,
-    player_query: Query<&Transform, With<PlayerControlled>>,
-    mut follower_query: Query<
-        (&mut Transform, &Movement, &mut Ant),
-        (With<crate::components::ant::Follower>, Without<PlayerControlled>),
-    >,
-) {
-    if clock.speed == SimSpeed::Paused {
-        return;
-    }
-
-    let Ok(player_tf) = player_query.get_single() else {
-        return;
-    };
-
-    let target = player_tf.translation.truncate();
-    let mut rng = rand::thread_rng();
-
-    for (mut tf, movement, mut ant) in &mut follower_query {
-        ant.state = AntState::Following;
-        let pos = tf.translation.truncate();
-        let to_player = target - pos;
-        let dist = to_player.length();
-
-        if dist > FOLLOW_DISTANCE {
-            let dir = to_player.normalize();
-            let jitter = Vec2::new(
-                rng.gen_range(-0.15..0.15),
-                rng.gen_range(-0.15..0.15),
-            );
-            let move_dir = (dir + jitter).normalize();
-            let speed = movement.speed * clock.speed.multiplier() * time.delta_secs();
-            tf.translation.x += move_dir.x * speed;
-            tf.translation.y += move_dir.y * speed;
-        }
-    }
-}
-
 fn update_follower_count(
     mut count: ResMut<FollowerCount>,
-    query: Query<&crate::components::ant::Follower>,
+    query: Query<&Ant>,
 ) {
-    count.0 = query.iter().count();
+    count.0 = query.iter().filter(|a| a.state == AntState::Following).count();
 }
 
 fn camera_follow_player(
