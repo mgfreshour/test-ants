@@ -62,7 +62,7 @@ Do not test:
         Why: protects specific historical failure modes.
 17. [x] **W17 (P2/S)** Add CI test partition: fast unit suite + slower integration suite.  
         Why: keeps feedback loop fast and reliable.
-18. [ ] **W18 (P3/S)** Add mutation-focused review checklist for simulation PRs.  
+18. [x] **W18 (P3/S)** Add mutation-focused review checklist for simulation PRs.  
         Why: improves long-term test quality and maintainability.
 
 ## Refactor Targets Required Before Most Testing
