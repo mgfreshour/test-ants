@@ -38,7 +38,7 @@ Do not test:
        Why: makes task-selection behavior testable with table-driven tests.
 5. [x] **W5 (P0/XL) - REFACTOR** Separate task state-machine transitions from ECS mutation in `nest_task_advance`.  
        Why: allows exhaustive sub-step transition tests without world setup overhead.
-6. [ ] **W6 (P0/M) - REFACTOR** Add deterministic RNG abstraction (`trait SimRng`) and seeded test implementation.  
+6. [x] **W6 (P0/M) - REFACTOR** Add deterministic RNG abstraction (`trait SimRng`) and seeded test implementation.  
        Why: removes flakiness from steering/selection tests.
 7. [ ] **W7 (P1/M)** Introduce test fixtures/builders for simulation state snapshots.  
        Why: reduces test boilerplate and encourages broad test coverage.
