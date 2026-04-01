@@ -125,7 +125,7 @@ fn surface_to_nest_transition(
     grid: Res<NestGrid>,
     mut commands: Commands,
     mut query: Query<
-        (Entity, &Transform, &mut Ant, &ColonyMember, &mut Visibility),
+        (Entity, &mut Transform, &mut Ant, &ColonyMember, &mut Visibility),
         (Without<Underground>, Without<PlayerControlled>),
     >,
     underground_count: Query<(), With<Underground>>,
@@ -145,7 +145,7 @@ fn surface_to_nest_transition(
 
     let mut rng = rand::thread_rng();
 
-    for (entity, transform, mut ant, colony, mut vis) in &mut query {
+    for (entity, mut transform, mut ant, colony, mut vis) in &mut query {
         if colony.colony_id != 0 {
             continue;
         }
@@ -168,19 +168,16 @@ fn surface_to_nest_transition(
 
             // Find the entrance cell and place ant there
             let entrance = find_label_cell(&grid, LABEL_ENTRANCE);
-            if let Some((_gx, _gy)) = entrance {
-                commands.entity(entity).insert((
-                    Underground,
-                    NestViewEntity,
-                    NestTask::Idle { timer: 0.0 },
-                ));
-            } else {
-                commands.entity(entity).insert((
-                    Underground,
-                    NestViewEntity,
-                    NestTask::Idle { timer: 0.0 },
-                ));
+            if let Some((gx, gy)) = entrance {
+                let nest_pos_world = nest_grid_to_world(gx, gy);
+                transform.translation.x = nest_pos_world.x;
+                transform.translation.y = nest_pos_world.y;
             }
+            commands.entity(entity).insert((
+                Underground,
+                NestViewEntity,
+                NestTask::Idle { timer: 0.0 },
+            ));
         }
     }
 }
@@ -235,7 +232,6 @@ fn nest_utility_scoring(
     dig_zones: Res<PlayerDigZones>,
     brood_query: Query<&Brood>,
     queen_query: Query<(), With<Queen>>,
-    _underground_query: Query<&Transform, With<Underground>>,
     mut query: Query<
         (Entity, &Transform, &Ant, &mut NestTask),
         With<Underground>,
@@ -260,6 +256,12 @@ fn nest_utility_scoring(
     let brood_count = brood_query.iter().count();
     let expansion_need = if brood_count > 8 { 0.3 } else { 0.0 };
 
+    // Count ants currently assigned to dig tasks for crowding feedback
+    let current_diggers = query
+        .iter()
+        .filter(|(_, _, _, t)| matches!(&**t, NestTask::Dig { .. }))
+        .count();
+
     for (_entity, transform, ant, mut task) in &mut query {
         // Only re-evaluate when current task is complete or idle
         let should_reevaluate = match &*task {
@@ -278,11 +280,11 @@ fn nest_utility_scoring(
         let grid_pos = world_to_nest_grid(pos);
 
         // Read pheromone inputs at current position
-        let (brood_need, queen_signal, construction) = if let Some((gx, gy)) = grid_pos {
+        let (brood_need, queen_signal) = if let Some((gx, gy)) = grid_pos {
             let cell = phero_grid.get(gx, gy);
-            (cell.brood_need, cell.queen_signal, cell.construction)
+            (cell.brood_need, cell.queen_signal)
         } else {
-            (0.0, 0.0, 0.0)
+            (0.0, 0.0)
         };
 
         // Age-based affinity (temporal polyethism)
@@ -314,14 +316,30 @@ fn nest_utility_scoring(
             0.0
         };
 
-        // Score DIG_AT_FACE
+        // Score DIG_AT_FACE — use pheromone at nearest dig face, not ant position
         let dig_score = if has_dig_faces {
-            let stigmergic = 0.3 + construction * 0.7;
-            let player_boost = if !dig_zones.cells.is_empty() { 0.4 } else { 0.0 };
-            (stigmergic + player_boost + expansion_need).min(1.0) * digging_affinity
+            // Find construction pheromone at nearest dig face to THIS ant
+            let nearest_face_construction = if let Some(gp) = grid_pos {
+                dig_faces
+                    .iter()
+                    .min_by_key(|&&(fx, fy)| {
+                        let dx = fx as i32 - gp.0 as i32;
+                        let dy = fy as i32 - gp.1 as i32;
+                        dx * dx + dy * dy
+                    })
+                    .map(|&(fx, fy)| phero_grid.get(fx, fy).construction)
+                    .unwrap_or(0.0)
+            } else {
+                0.0
+            };
 
-            // Self-limiting: count nearby underground ants
-            // More ants near dig face → lower effective score
+            let stigmergic = 0.3 + nearest_face_construction * 0.7;
+            let player_boost = if !dig_zones.cells.is_empty() { 0.4 } else { 0.0 };
+
+            // Self-limiting: more diggers already assigned → lower score for new recruits
+            let crowding_penalty = 1.0 / (1.0 + current_diggers as f32 * 0.3);
+
+            (stigmergic + player_boost + expansion_need).min(1.0) * digging_affinity * crowding_penalty
         } else {
             0.0
         };
@@ -365,6 +383,8 @@ fn nest_task_advance(
     clock: Res<SimClock>,
     time: Res<Time>,
     grid: Res<NestGrid>,
+    phero_grid: Res<NestPheromoneGrid>,
+    dig_zones: Res<PlayerDigZones>,
     mut path_cache: ResMut<NestPathCache>,
     mut colony_food: ResMut<ColonyFood>,
     mut commands: Commands,
@@ -501,8 +521,19 @@ fn nest_task_advance(
                             if let Some(goal) = find_label_cell(&grid, LABEL_QUEEN) {
                                 if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
                                     commands.entity(entity).insert(NestPath::new(waypoints));
+                                    *step = AttendStep::Walking;
+                                } else {
+                                    *task = NestTask::Idle { timer: 0.0 };
+                                    continue;
                                 }
+                            } else {
+                                *task = NestTask::Idle { timer: 0.0 };
+                                continue;
                             }
+                        }
+                    }
+                    AttendStep::Walking => {
+                        if path_complete {
                             *step = AttendStep::Grooming;
                         }
                     }
@@ -522,15 +553,51 @@ fn nest_task_advance(
                                 *task = NestTask::Idle { timer: 0.0 };
                                 continue;
                             }
-                            // Pick closest dig face
-                            let best = dig_faces
+                            // Score each face by: tunnel-shape bias, construction pheromone,
+                            // player zone bonus, penalized by distance.
+                            let mut rng = rand::thread_rng();
+                            let mut scored: Vec<((usize, usize), f32)> = dig_faces
                                 .iter()
-                                .min_by_key(|&&(fx, fy)| {
+                                .map(|&(fx, fy)| {
+                                    let construction = phero_grid.get(fx, fy).construction;
+                                    let player_bonus = if dig_zones.cells.contains(&(fx, fy)) { 0.5 } else { 0.0 };
                                     let dx = fx as i32 - grid_pos.0 as i32;
                                     let dy = fy as i32 - grid_pos.1 as i32;
-                                    dx * dx + dy * dy
+                                    let dist_sq = (dx * dx + dy * dy) as f32;
+                                    let proximity = 1.0 / (1.0 + dist_sq.sqrt() * 0.1);
+
+                                    // Tunnel-shape bias: count how many of the 4 cardinal
+                                    // neighbors are solid (diggable/impassable). More solid
+                                    // neighbors = extending a tunnel (good). Fewer = widening
+                                    // a chamber (bad). 3 solid → strong tunnel, 2 → okay,
+                                    // 1 → widening, 0 → isolated.
+                                    let solid_neighbors = [(-1i32, 0), (1, 0), (0, -1i32), (0, 1)]
+                                        .iter()
+                                        .filter(|&&(ndx, ndy)| {
+                                            let nx = fx as i32 + ndx;
+                                            let ny = fy as i32 + ndy;
+                                            nx >= 0
+                                                && ny >= 0
+                                                && (nx as usize) < grid.width
+                                                && (ny as usize) < grid.height
+                                                && !grid.get(nx as usize, ny as usize).is_passable()
+                                        })
+                                        .count();
+                                    // 3 solid → 1.0, 2 → 0.6, 1 → 0.3, 0 → 0.1
+                                    let narrowness = match solid_neighbors {
+                                        3 => 1.0,
+                                        2 => 0.6,
+                                        1 => 0.3,
+                                        _ => 0.1,
+                                    };
+
+                                    let score = (construction + player_bonus + 0.1) * proximity * narrowness;
+                                    let jitter = rng.gen_range(0.0..0.15);
+                                    ((fx, fy), score + jitter)
                                 })
-                                .copied();
+                                .collect();
+                            scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                            let best = scored.first().map(|&(pos, _)| pos);
                             if let Some(face) = best {
                                 *target_cell = Some(face);
                                 // Path to an adjacent passable cell

@@ -3,6 +3,7 @@ use rand::Rng;
 
 use crate::components::ant::{
     Ant, AntState, CarriedItem, Caste, ColonyMember, Movement, PlayerControlled, PositionHistory,
+    Underground,
 };
 use crate::components::pheromone::PheromoneType;
 use crate::components::terrain::FoodSource;
@@ -73,7 +74,7 @@ impl Plugin for PlayerPlugin {
 
 fn designate_player_ant(
     mut commands: Commands,
-    query: Query<(Entity, &ColonyMember), With<Ant>>,
+    query: Query<(Entity, &ColonyMember), (With<Ant>, Without<Underground>)>,
     existing: Query<Entity, With<PlayerControlled>>,
 ) {
     if !existing.is_empty() {
@@ -287,7 +288,7 @@ fn exchange_ant(
     mode: Res<PlayerMode>,
     mut commands: Commands,
     player_query: Query<(Entity, &Transform), With<PlayerControlled>>,
-    candidate_query: Query<(Entity, &Transform), (With<Ant>, Without<PlayerControlled>)>,
+    candidate_query: Query<(Entity, &Transform), (With<Ant>, Without<PlayerControlled>, Without<Underground>)>,
 ) {
     if !mode.controlling || !input.just_pressed(KeyCode::KeyX) {
         return;

@@ -123,14 +123,6 @@ impl NestPath {
     }
 }
 
-/// Marker for test ants that pathfind through the nest.
-#[derive(Component)]
-pub struct NestTestAnt {
-    /// Chamber label index this ant is navigating toward.
-    pub target_label: usize,
-    /// Timer for picking a new destination after reaching current one.
-    pub retarget_timer: f32,
-}
 
 /// Task assigned to a nest ant by the utility AI.
 #[derive(Component, Debug, Clone)]
@@ -162,6 +154,7 @@ pub enum HaulStep {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttendStep {
     GoToQueen,
+    Walking,
     Grooming,
 }
 

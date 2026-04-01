@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::components::ant::Underground;
 use crate::components::nest::NestPath;
 use crate::plugins::nest::{GameView, NestViewEntity};
 use crate::resources::nest::{NestGrid, NEST_CELL_SIZE, NEST_HEIGHT, NEST_WIDTH};
@@ -23,9 +24,12 @@ impl Plugin for NestNavigationPlugin {
                 (
                     nest_path_following,
                     nest_grid_collision,
-                    update_debug_path_lines,
                 )
-                    .chain()
+                    .chain(),
+            )
+            .add_systems(
+                Update,
+                update_debug_path_lines
                     .run_if(in_state(GameView::Underground)),
             );
     }
@@ -99,23 +103,52 @@ fn nest_path_following(
 }
 
 /// Clamp ant positions to passable cells — prevents walking through walls.
+/// Checks all underground ants, not just those with a path, so newly
+/// transitioned or idle ants that land in a wall are teleported to safety.
 fn nest_grid_collision(
     grid: Res<NestGrid>,
-    mut query: Query<&mut Transform, With<NestPath>>,
+    mut query: Query<(Entity, &mut Transform), With<Underground>>,
 ) {
-    for mut transform in &mut query {
+    for (entity, mut transform) in &mut query {
         let pos = transform.translation.truncate();
-        if let Some((gx, gy)) = world_to_nest_grid(pos) {
-            if !grid.get(gx, gy).is_passable() {
-                // Find nearest passable cell
+        match world_to_nest_grid(pos) {
+            Some((gx, gy)) if !grid.get(gx, gy).is_passable() => {
                 if let Some((nx, ny)) = find_nearest_passable(&grid, gx, gy) {
+                    debug!(
+                        "Ant {:?} in wall at grid ({}, {}), world ({:.1}, {:.1}) — relocating to ({}, {})",
+                        entity, gx, gy, pos.x, pos.y, nx, ny
+                    );
                     let safe = nest_grid_to_world(nx, ny);
                     transform.translation.x = safe.x;
                     transform.translation.y = safe.y;
                 }
             }
+            None => {
+                // Ant is outside the grid entirely — teleport to entrance
+                debug!(
+                    "Ant {:?} outside nest grid at world ({:.1}, {:.1}) — teleporting to entrance",
+                    entity, pos.x, pos.y
+                );
+                if let Some((ex, ey)) = find_entrance(&grid) {
+                    let safe = nest_grid_to_world(ex, ey);
+                    transform.translation.x = safe.x;
+                    transform.translation.y = safe.y;
+                }
+            }
+            _ => {}
         }
     }
+}
+
+/// Find the entrance cell (first passable cell in the center column).
+fn find_entrance(grid: &NestGrid) -> Option<GridPos> {
+    let cx = grid.width / 2;
+    for y in 0..grid.height {
+        if grid.get(cx, y).is_passable() {
+            return Some((cx, y));
+        }
+    }
+    None
 }
 
 /// BFS to find the nearest passable cell from a given position.

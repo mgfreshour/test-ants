@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::ant::{Ant, AntState, CarriedItem, ColonyMember, Follower, Health, Movement, PlayerControlled, PositionHistory, TrailSense};
+use crate::components::ant::{Ant, AntState, CarriedItem, ColonyMember, Follower, Health, Movement, PlayerControlled, PositionHistory, TrailSense, Underground};
 use crate::components::pheromone::PheromoneType;
 use crate::components::terrain::{FoodSource, NestEntrance};
 use crate::resources::pheromone::{ColonyPheromones, PheromoneConfig};
@@ -431,7 +431,7 @@ fn ant_pheromone_deposit(
 fn ant_movement(
     clock: Res<SimClock>,
     time: Res<Time>,
-    mut query: Query<(&mut Transform, &Movement), (With<Ant>, Without<PlayerControlled>)>,
+    mut query: Query<(&mut Transform, &Movement), (With<Ant>, Without<PlayerControlled>, Without<Underground>)>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -462,7 +462,7 @@ fn record_position_history(
 fn ant_boundary_bounce(
     clock: Res<SimClock>,
     config: Res<SimConfig>,
-    mut query: Query<(&mut Transform, &mut Movement), With<Ant>>,
+    mut query: Query<(&mut Transform, &mut Movement), (With<Ant>, Without<Underground>)>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
