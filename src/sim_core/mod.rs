@@ -7,6 +7,7 @@ pub mod ant_logic;
 pub mod clock;
 pub mod nest_scoring;
 pub mod nest_transitions;
+pub mod regressions;
 pub mod rng;
 #[cfg(test)]
 pub mod test_fixtures;

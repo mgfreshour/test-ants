@@ -58,7 +58,7 @@ Do not test:
         Why: catches broad classes of logic bugs early.
 15. [x] **W15 (P2/M)** Add integration tests with `bevy::app::App` for minimal end-to-end sim ticks (headless).  
         Why: validates ECS wiring while keeping display assertions out of scope.
-16. [ ] **W16 (P2/M)** Add regression tests for known bug-prone flows (orphaned returners, portal transitions, dig face selection).  
+16. [x] **W16 (P2/M)** Add regression tests for known bug-prone flows (orphaned returners, portal transitions, dig face selection).  
         Why: protects specific historical failure modes.
 17. [ ] **W17 (P2/S)** Add CI test partition: fast unit suite + slower integration suite.  
         Why: keeps feedback loop fast and reliable.

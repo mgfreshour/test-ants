@@ -17,6 +17,7 @@ use crate::resources::nest_pheromone::{
     NestPheromoneGrid, LABEL_BROOD, LABEL_ENTRANCE, LABEL_FOOD_STORAGE, LABEL_MIDDEN, LABEL_QUEEN,
 };
 use crate::resources::simulation::{SimClock, SimSpeed};
+use crate::sim_core::regressions;
 use crate::sim_core::nest_scoring::{choose_task, compute_scores, NestScoringInput, NestTaskChoice};
 use crate::sim_core::nest_transitions;
 
@@ -208,14 +209,14 @@ fn portal_transition(
             // Entering a nest — apply throttle based on sliders.
             let target_is_nest = portal.target_map != registry.surface;
             if target_is_nest {
-                if current_underground >= desired_underground {
-                    break;
-                }
-                if ant.state != AntState::Foraging {
-                    break;
-                }
                 // Small random chance per frame to prevent all entering at once.
-                if rng.gen::<f32>() > 0.02 {
+                if !regressions::should_enter_nest(
+                    current_underground,
+                    desired_underground,
+                    ant.state == AntState::Foraging,
+                    rng.gen::<f32>(),
+                    0.02,
+                ) {
                     break;
                 }
 
@@ -954,12 +955,13 @@ fn nest_task_advance(
                                 }
                                 let mut rng = rand::thread_rng();
                                 // Filter out faces with 5+ ants already targeting them.
-                                let available_faces: Vec<_> = dig_faces
-                                    .iter()
-                                    .copied()
-                                    .filter(|face| dig_target_counts.get(face).copied().unwrap_or(0) < 5)
-                                    .collect();
-                                let faces_to_score = if available_faces.is_empty() { &dig_faces } else { &available_faces };
+                                let available_faces =
+                                    regressions::select_available_dig_faces(
+                                        &dig_faces,
+                                        &dig_target_counts,
+                                        5,
+                                    );
+                                let faces_to_score = &available_faces;
                                 let mut scored: Vec<((usize, usize), f32)> = faces_to_score
                                     .iter()
                                     .map(|&(fx, fy)| {

@@ -25,6 +25,7 @@ use crate::resources::pheromone::{ColonyPheromones, PheromoneConfig};
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 use crate::resources::spatial_grid::SpatialGrid;
 use crate::sim_core::ant_logic;
+use crate::sim_core::regressions;
 use crate::plugins::nest::nest_grid_to_world;
 
 pub struct AntAiPlugin;
@@ -194,7 +195,10 @@ fn fix_orphaned_returners(
     mut query: Query<(&Transform, &ColonyMember, &mut Ant, &mut PositionHistory), (Without<CarriedItem>, Without<PlayerControlled>)>,
 ) {
     for (transform, colony, mut ant, mut history) in &mut query {
-        if ant.state == AntState::Returning {
+        if regressions::should_reset_orphaned_returner(
+            ant.state == AntState::Returning,
+            false,
+        ) {
             ant.state = AntState::Foraging;
             history.clear();
         }
