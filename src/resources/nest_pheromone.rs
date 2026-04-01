@@ -25,6 +25,10 @@ pub struct NestCellPheromones {
     pub construction: f32,
     /// Brood need signal — emitted by unfed larvae.
     pub brood_need: f32,
+    /// Trail pheromone — bridges from surface through portals, player-depositable.
+    pub trail: f32,
+    /// Recruit pheromone — bridges from surface through portals, attracts followers.
+    pub recruit: f32,
 }
 
 /// Configuration for nest pheromone dynamics.
@@ -46,6 +50,16 @@ pub struct NestPheromoneConfig {
     pub brood_need_decay: f32,
     /// Brood need emission strength per unfed larva per tick.
     pub brood_need_emission: f32,
+    /// Trail pheromone decay rate (matches surface).
+    pub trail_decay_rate: f32,
+    /// Recruit pheromone decay rate (matches surface).
+    pub recruit_decay_rate: f32,
+    /// Trail pheromone diffusion rate through passable cells.
+    pub trail_diffuse_rate: f32,
+    /// Recruit pheromone diffusion rate through passable cells.
+    pub recruit_diffuse_rate: f32,
+    /// Max intensity for trail/recruit pheromones underground.
+    pub trail_recruit_max: f32,
 }
 
 impl Default for NestPheromoneConfig {
@@ -59,6 +73,11 @@ impl Default for NestPheromoneConfig {
             construction_decay_rate: 0.01,
             brood_need_decay: 0.005,
             brood_need_emission: 0.1,
+            trail_decay_rate: 0.05,
+            recruit_decay_rate: 0.01,
+            trail_diffuse_rate: 0.005,
+            recruit_diffuse_rate: 0.04,
+            trail_recruit_max: 200.0,
         }
     }
 }
@@ -96,6 +115,8 @@ impl NestPheromoneGrid {
                 queen_signal: 0.0,
                 construction: 0.0,
                 brood_need: 0.0,
+                trail: 0.0,
+                recruit: 0.0,
             };
             &DEFAULT
         }
@@ -156,6 +177,16 @@ impl NestPheromoneGrid {
             if cell.brood_need < 0.001 {
                 cell.brood_need = 0.0;
             }
+            // Trail pheromone decays
+            cell.trail *= 1.0 - config.trail_decay_rate;
+            if cell.trail < 0.001 {
+                cell.trail = 0.0;
+            }
+            // Recruit pheromone decays
+            cell.recruit *= 1.0 - config.recruit_decay_rate;
+            if cell.recruit < 0.001 {
+                cell.recruit = 0.0;
+            }
         }
     }
 
@@ -205,6 +236,103 @@ impl NestPheromoneGrid {
         for (idx, &delta) in deltas.iter().enumerate() {
             self.cells[idx].queen_signal = (self.cells[idx].queen_signal + delta).max(0.0).min(1.0);
         }
+    }
+
+    /// Diffuse trail and recruit pheromones through passable cells.
+    pub fn diffuse_trail_recruit(&mut self, grid: &NestGrid, trail_rate: f32, recruit_rate: f32, max: f32) {
+        let len = self.cells.len();
+        let mut trail_deltas = vec![0.0f32; len];
+        let mut recruit_deltas = vec![0.0f32; len];
+
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if !grid.get(x, y).is_passable() {
+                    continue;
+                }
+                let idx = self.index(x, y);
+                let trail_val = self.cells[idx].trail;
+                let recruit_val = self.cells[idx].recruit;
+
+                let mut neighbor_count = 0u32;
+                let mut trail_sum = 0.0f32;
+                let mut recruit_sum = 0.0f32;
+
+                for dy in -1i32..=1 {
+                    for dx in -1i32..=1 {
+                        if dx == 0 && dy == 0 {
+                            continue;
+                        }
+                        let nx = x as i32 + dx;
+                        let ny = y as i32 + dy;
+                        if nx >= 0
+                            && ny >= 0
+                            && (nx as usize) < self.width
+                            && (ny as usize) < self.height
+                            && grid.get(nx as usize, ny as usize).is_passable()
+                        {
+                            let nidx = self.index(nx as usize, ny as usize);
+                            trail_sum += self.cells[nidx].trail;
+                            recruit_sum += self.cells[nidx].recruit;
+                            neighbor_count += 1;
+                        }
+                    }
+                }
+
+                if neighbor_count > 0 {
+                    let trail_avg = trail_sum / neighbor_count as f32;
+                    let recruit_avg = recruit_sum / neighbor_count as f32;
+                    trail_deltas[idx] = trail_rate * (trail_avg - trail_val);
+                    recruit_deltas[idx] = recruit_rate * (recruit_avg - recruit_val);
+                }
+            }
+        }
+
+        for (idx, (&td, &rd)) in trail_deltas.iter().zip(recruit_deltas.iter()).enumerate() {
+            self.cells[idx].trail = (self.cells[idx].trail + td).clamp(0.0, max);
+            if self.cells[idx].trail < 0.001 { self.cells[idx].trail = 0.0; }
+            self.cells[idx].recruit = (self.cells[idx].recruit + rd).clamp(0.0, max);
+            if self.cells[idx].recruit < 0.001 { self.cells[idx].recruit = 0.0; }
+        }
+    }
+
+    /// Compute a gradient direction for a given field (trail or recruit) at a position.
+    pub fn sense_trail_recruit_gradient(
+        &self,
+        grid: &NestGrid,
+        x: usize,
+        y: usize,
+        use_recruit: bool,
+        radius: i32,
+    ) -> Vec2 {
+        let mut gradient = Vec2::ZERO;
+
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                let nx = x as i32 + dx;
+                let ny = y as i32 + dy;
+                if nx >= 0
+                    && ny >= 0
+                    && (nx as usize) < self.width
+                    && (ny as usize) < self.height
+                    && grid.get(nx as usize, ny as usize).is_passable()
+                {
+                    let cell = self.get(nx as usize, ny as usize);
+                    let intensity = if use_recruit { cell.recruit } else { cell.trail };
+                    if intensity < 0.001 {
+                        continue;
+                    }
+                    let cell_dir = Vec2::new(dx as f32, -(dy as f32)).normalize();
+                    let dist = ((dx * dx + dy * dy) as f32).sqrt();
+                    let dist_weight = 1.0 / (1.0 + dist);
+                    gradient += cell_dir * intensity * dist_weight;
+                }
+            }
+        }
+
+        gradient
     }
 
     /// Get the strongest chamber label direction from a position (for navigation).

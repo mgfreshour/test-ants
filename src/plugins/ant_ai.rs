@@ -20,7 +20,9 @@ const DEPOSIT_HUNGER_RELIEF: f32 = 0.3;
 use crate::components::pheromone::PheromoneType;
 use crate::components::terrain::FoodSource;
 use crate::resources::active_map::MapRegistry;
+use crate::components::nest::NestTask;
 use crate::resources::nest::NestGrid;
+use crate::resources::nest_pheromone::NestPheromoneGrid;
 use crate::resources::pheromone::{ColonyPheromones, PheromoneConfig};
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 use crate::resources::spatial_grid::SpatialGrid;
@@ -49,6 +51,7 @@ impl Plugin for AntAiPlugin {
                     ant_forage_steering,
                     ant_follow_recruit_steering,
                     ant_attack_recruit_steering,
+                    nest_recruit_following,
                     ant_return_steering,
                     food_detection_and_pickup,
                     nest_food_deposit,
@@ -491,6 +494,66 @@ fn ant_attack_recruit_steering(
             ant.state = AntState::Foraging;
             *sense = TrailSense::Searching;
         }
+    }
+}
+
+/// Underground followers: steer along the Recruit pheromone gradient in the nest.
+/// When signal fades, revert to Idle so they stop wandering.
+fn nest_recruit_following(
+    clock: Res<SimClock>,
+    registry: Res<MapRegistry>,
+    nest_phero_query: Query<(&NestPheromoneGrid, &NestGrid), With<MapMarker>>,
+    mut query: Query<
+        (&Transform, &mut Movement, &mut Ant, &MapId, &mut TrailSense),
+        (With<NestTask>, Without<PlayerControlled>),
+    >,
+) {
+    if clock.speed == SimSpeed::Paused {
+        return;
+    }
+
+    let mut rng = rand::thread_rng();
+
+    for (transform, mut movement, mut ant, map_id, mut sense) in &mut query {
+        if ant.state != AntState::Following {
+            continue;
+        }
+        // Only for underground ants.
+        if map_id.0 == registry.surface {
+            continue;
+        }
+
+        let Ok((phero_grid, nest_grid)) = nest_phero_query.get(map_id.0) else {
+            continue;
+        };
+
+        let pos = transform.translation.truncate();
+        let Some((gx, gy)) = crate::plugins::nest_pheromone::world_to_nest_grid(pos) else {
+            continue;
+        };
+
+        let local = phero_grid.get(gx, gy).recruit;
+        if local < 0.5 {
+            // No recruit signal — revert to idle-like foraging.
+            ant.state = AntState::Foraging;
+            *sense = TrailSense::Searching;
+            continue;
+        }
+
+        let grad = phero_grid.sense_trail_recruit_gradient(nest_grid, gx, gy, true, 4);
+        if grad.length_squared() > 0.001 {
+            let jitter = Vec2::new(
+                rng.gen_range(-0.1..0.1),
+                rng.gen_range(-0.1..0.1),
+            );
+            let new_dir = (grad.normalize() * 0.7 + movement.direction * 0.3 + jitter)
+                .normalize_or_zero();
+            if new_dir != Vec2::ZERO {
+                movement.direction = new_dir;
+            }
+        }
+
+        *sense = TrailSense::FollowingTrail;
     }
 }
 

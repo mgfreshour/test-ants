@@ -1,19 +1,30 @@
 use bevy::prelude::*;
+use rand::Rng;
 
 use crate::components::ant::{
     Ant, AntState, CarriedItem, ColonyMember, Movement, PlayerControlled,
 };
-use crate::components::map::{MapId, MapMarker};
+use crate::components::map::{MapId, MapKind, MapMarker, MapPortal, PORTAL_RANGE};
+use crate::components::nest::{NestPath, NestTask};
 use crate::components::pheromone::PheromoneType;
 use crate::components::terrain::FoodSource;
 use crate::plugins::ant_ai::ColonyFood;
 use crate::plugins::camera::MainCamera;
-use crate::resources::active_map::{MapRegistry, viewing_surface};
+use crate::plugins::nest_navigation::world_to_nest_grid;
+use crate::resources::active_map::{ActiveMap, MapRegistry, SavedCamera, SavedCameraStates};
+use crate::resources::nest::NestGrid;
+use crate::resources::nest_pheromone::{NestPheromoneConfig, NestPheromoneGrid};
 use crate::resources::pheromone::{ColonyPheromones, PheromoneConfig};
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 
 /// Radius (in grid cells) around the player where Recruit pheromone is deposited
 const RECRUIT_DEPOSIT_RADIUS: i32 = 3;
+
+/// Nest ant movement speed (matches nest_navigation::NEST_ANT_SPEED).
+const NEST_PLAYER_SPEED: f32 = 60.0;
+
+/// Default nest-view camera scale (matches nest.rs).
+const NEST_CAMERA_SCALE: f32 = 0.7;
 
 /// Which pheromone the R key deposits: follow (Recruit) or attack (AttackRecruit).
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,12 +92,15 @@ impl Plugin for PlayerPlugin {
                     update_follower_count,
                 ),
             )
+            // Systems that work on any map (no viewing_surface gate).
             .add_systems(
                 Update,
                 (
                     toggle_player_mode,
                     toggle_recruit_mode,
+                    player_portal_transition,
                     player_movement,
+                    player_nest_collision,
                     player_pickup,
                     player_drop,
                     player_regurgitate,
@@ -97,8 +111,7 @@ impl Plugin for PlayerPlugin {
                     camera_follow_player,
                     update_player_visual,
                 )
-                    .chain()
-                    .run_if(viewing_surface),
+                    .chain(),
             );
     }
 }
@@ -151,18 +164,151 @@ fn toggle_recruit_mode(
     }
 }
 
+// ── Portal transition ───────────────────────────────────────────────
+
+/// Press Enter near a portal to transition the player (and followers) between maps.
+fn player_portal_transition(
+    input: Res<ButtonInput<KeyCode>>,
+    mode: Res<PlayerMode>,
+    mut commands: Commands,
+    registry: Res<MapRegistry>,
+    config: Res<SimConfig>,
+    mut active: ResMut<ActiveMap>,
+    mut saved: ResMut<SavedCameraStates>,
+    mut camera_query: Query<(&mut Transform, &mut OrthographicProjection), With<MainCamera>>,
+    portal_query: Query<&MapPortal>,
+    map_kind_query: Query<&MapKind, With<MapMarker>>,
+    mut player_query: Query<
+        (Entity, &mut Transform, &mut MapId, &mut Visibility, &ColonyMember),
+        (With<PlayerControlled>, Without<MainCamera>),
+    >,
+    mut follower_query: Query<
+        (Entity, &mut Transform, &mut Ant, &mut MapId, &mut Visibility),
+        (Without<PlayerControlled>, Without<MainCamera>),
+    >,
+) {
+    if !mode.controlling || !input.just_pressed(KeyCode::Enter) {
+        return;
+    }
+
+    let Ok((player_entity, mut player_tf, mut player_map, mut player_vis, colony)) =
+        player_query.get_single_mut()
+    else {
+        return;
+    };
+
+    let player_pos = player_tf.translation.truncate();
+
+    // Find a portal on the player's current map within range.
+    let mut found_portal: Option<&MapPortal> = None;
+    for portal in &portal_query {
+        if portal.map != player_map.0 {
+            continue;
+        }
+        if let Some(required) = portal.colony_id {
+            if colony.colony_id != required {
+                continue;
+            }
+        }
+        if player_pos.distance(portal.position) <= PORTAL_RANGE {
+            found_portal = Some(portal);
+            break;
+        }
+    }
+
+    let Some(portal) = found_portal else { return };
+
+    let target_map = portal.target_map;
+    let target_pos = portal.target_position;
+    let portal_pos = portal.position;
+    let entering_nest = target_map != registry.surface;
+
+    // Transition the player.
+    player_map.0 = target_map;
+    player_tf.translation.x = target_pos.x;
+    player_tf.translation.y = target_pos.y;
+    *player_vis = Visibility::Hidden; // sync_map_visibility will correct
+
+    // If entering nest, remove any NestTask (player is player-controlled, not AI).
+    // If leaving nest, also clean up.
+    commands.entity(player_entity).remove::<NestTask>();
+    commands.entity(player_entity).remove::<NestPath>();
+
+    // Transition followers near the portal.
+    let follower_range = PORTAL_RANGE * 3.0;
+    let mut rng = rand::thread_rng();
+    for (entity, mut tf, mut ant, mut map_id, mut vis) in &mut follower_query {
+        if ant.state != AntState::Following || map_id.0 != active.entity {
+            continue;
+        }
+        let dist = tf.translation.truncate().distance(portal_pos);
+        if dist > follower_range {
+            continue;
+        }
+
+        map_id.0 = target_map;
+        let jitter_x = rng.gen_range(-12.0..12.0f32);
+        let jitter_y = rng.gen_range(-12.0..12.0f32);
+        tf.translation.x = target_pos.x + jitter_x;
+        tf.translation.y = target_pos.y + jitter_y;
+        *vis = Visibility::Hidden;
+
+        if entering_nest {
+            commands.entity(entity).insert(NestTask::Idle { timer: 0.0 });
+            ant.state = AntState::Following;
+        } else {
+            commands.entity(entity).remove::<NestTask>();
+            commands.entity(entity).remove::<NestPath>();
+            ant.state = AntState::Following;
+        }
+    }
+
+    // Switch the active map view (mirrors cycle_map_view logic).
+    let Ok((mut cam_tf, mut proj)) = camera_query.get_single_mut() else { return };
+
+    // Save camera state for the map we're leaving.
+    saved.0.insert(active.entity, SavedCamera {
+        position: cam_tf.translation.truncate(),
+        scale: proj.scale,
+    });
+
+    let target_kind = map_kind_query.get(target_map).copied().unwrap_or(MapKind::Surface);
+
+    // Restore or set default camera for the target map.
+    if let Some(cam) = saved.0.get(&target_map) {
+        cam_tf.translation.x = cam.position.x;
+        cam_tf.translation.y = cam.position.y;
+        proj.scale = cam.scale;
+    } else if entering_nest {
+        cam_tf.translation.x = target_pos.x;
+        cam_tf.translation.y = target_pos.y;
+        proj.scale = NEST_CAMERA_SCALE;
+    } else {
+        cam_tf.translation.x = config.world_width / 2.0;
+        cam_tf.translation.y = config.world_height / 2.0;
+        proj.scale = 1.0;
+    }
+
+    active.entity = target_map;
+    active.kind = target_kind;
+}
+
+// ── Movement ────────────────────────────────────────────────────────
+
 fn player_movement(
     clock: Res<SimClock>,
     time: Res<Time>,
     input: Res<ButtonInput<KeyCode>>,
     mode: Res<PlayerMode>,
-    mut query: Query<(&mut Transform, &Movement, &mut Ant), With<PlayerControlled>>,
+    registry: Res<MapRegistry>,
+    nest_query: Query<&NestGrid, With<MapMarker>>,
+    mut query: Query<(&mut Transform, &Movement, &mut Ant, &MapId), With<PlayerControlled>>,
 ) {
     if !mode.controlling || clock.speed == SimSpeed::Paused {
         return;
     }
 
-    let Ok((mut transform, movement, mut ant)) = query.get_single_mut() else {
+    let Ok((mut transform, movement, mut ant, map_id)) = query.get_single_mut() else {
         return;
     };
 
@@ -180,32 +326,119 @@ fn player_movement(
         dir.x += 1.0;
     }
 
-    if dir != Vec2::ZERO {
-        let dir = dir.normalize();
+    if dir == Vec2::ZERO {
+        return;
+    }
+
+    let dir = dir.normalize();
+    let is_underground = map_id.0 != registry.surface;
+
+    if is_underground {
+        // Underground: use nest speed, check passability before moving.
+        let speed = NEST_PLAYER_SPEED * clock.speed.multiplier() * time.delta_secs();
+        let new_x = transform.translation.x + dir.x * speed;
+        let new_y = transform.translation.y + dir.y * speed;
+        let new_pos = Vec2::new(new_x, new_y);
+
+        if let Ok(grid) = nest_query.get(map_id.0) {
+            if let Some((gx, gy)) = world_to_nest_grid(new_pos) {
+                if grid.get(gx, gy).is_passable() {
+                    transform.translation.x = new_x;
+                    transform.translation.y = new_y;
+                }
+            }
+            // If out of bounds or not passable, don't move.
+        }
+    } else {
+        // Surface: existing logic.
         let speed = movement.speed * clock.speed.multiplier() * time.delta_secs();
         transform.translation.x += dir.x * speed;
         transform.translation.y += dir.y * speed;
+    }
 
-        if ant.state != AntState::Returning {
-            ant.state = AntState::Foraging;
-        }
+    if ant.state != AntState::Returning {
+        ant.state = AntState::Foraging;
     }
 }
+
+/// Clamp player position to passable cells when underground.
+fn player_nest_collision(
+    registry: Res<MapRegistry>,
+    nest_query: Query<&NestGrid, With<MapMarker>>,
+    mut query: Query<(&mut Transform, &MapId), With<PlayerControlled>>,
+) {
+    let Ok((mut transform, map_id)) = query.get_single_mut() else { return };
+    if map_id.0 == registry.surface {
+        return;
+    }
+
+    let Ok(grid) = nest_query.get(map_id.0) else { return };
+    let pos = transform.translation.truncate();
+
+    match world_to_nest_grid(pos) {
+        Some((gx, gy)) if !grid.get(gx, gy).is_passable() => {
+            // Find nearest passable cell.
+            for radius in 1i32..10 {
+                for dy in -radius..=radius {
+                    for dx in -radius..=radius {
+                        if dx.abs() != radius && dy.abs() != radius {
+                            continue;
+                        }
+                        let nx = gx as i32 + dx;
+                        let ny = gy as i32 + dy;
+                        if nx >= 0
+                            && ny >= 0
+                            && (nx as usize) < grid.width
+                            && (ny as usize) < grid.height
+                            && grid.get(nx as usize, ny as usize).is_passable()
+                        {
+                            let safe = crate::plugins::nest_navigation::nest_grid_to_world(
+                                nx as usize, ny as usize,
+                            );
+                            transform.translation.x = safe.x;
+                            transform.translation.y = safe.y;
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+        None => {
+            // Outside grid entirely — teleport to entrance.
+            let cx = grid.width / 2;
+            for y in 0..grid.height {
+                if grid.get(cx, y).is_passable() {
+                    let safe = crate::plugins::nest_navigation::nest_grid_to_world(cx, y);
+                    transform.translation.x = safe.x;
+                    transform.translation.y = safe.y;
+                    return;
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+// ── Surface-only interactions ───────────────────────────────────────
 
 fn player_pickup(
     input: Res<ButtonInput<KeyCode>>,
     mode: Res<PlayerMode>,
+    registry: Res<MapRegistry>,
     mut commands: Commands,
-    player_query: Query<(Entity, &Transform, &Ant), (With<PlayerControlled>, Without<CarriedItem>)>,
+    player_query: Query<(Entity, &Transform, &MapId), (With<PlayerControlled>, Without<CarriedItem>)>,
     mut food_query: Query<(&Transform, &mut FoodSource)>,
 ) {
     if !mode.controlling || !input.just_pressed(KeyCode::KeyE) {
         return;
     }
 
-    let Ok((player_entity, player_tf, _ant)) = player_query.get_single() else {
+    let Ok((player_entity, player_tf, map_id)) = player_query.get_single() else {
         return;
     };
+    if map_id.0 != registry.surface {
+        return;
+    }
 
     let player_pos = player_tf.translation.truncate();
 
@@ -228,19 +461,22 @@ fn player_pickup(
 fn player_drop(
     input: Res<ButtonInput<KeyCode>>,
     mode: Res<PlayerMode>,
+    registry: Res<MapRegistry>,
     mut commands: Commands,
     config: Res<SimConfig>,
-    registry: Res<MapRegistry>,
     mut food_query: Query<&mut ColonyFood, With<MapMarker>>,
-    query: Query<(Entity, &Transform, &CarriedItem), With<PlayerControlled>>,
+    query: Query<(Entity, &Transform, &CarriedItem, &MapId), With<PlayerControlled>>,
 ) {
     if !mode.controlling || !input.just_pressed(KeyCode::KeyQ) {
         return;
     }
 
-    let Ok((entity, transform, carried)) = query.get_single() else {
+    let Ok((entity, transform, carried, map_id)) = query.get_single() else {
         return;
     };
+    if map_id.0 != registry.surface {
+        return;
+    }
 
     let pos = transform.translation.truncate();
     let dist_to_nest = pos.distance(config.nest_position);
@@ -256,21 +492,24 @@ fn player_drop(
 fn player_regurgitate(
     input: Res<ButtonInput<KeyCode>>,
     mode: Res<PlayerMode>,
+    registry: Res<MapRegistry>,
     mut commands: Commands,
-    player_query: Query<(Entity, &Transform, &CarriedItem), With<PlayerControlled>>,
+    player_query: Query<(Entity, &Transform, &CarriedItem, &MapId), With<PlayerControlled>>,
     mut ant_query: Query<(&Transform, &mut Ant), Without<PlayerControlled>>,
 ) {
     if !mode.controlling || !input.just_pressed(KeyCode::KeyF) {
         return;
     }
 
-    let Ok((player_entity, player_tf, carried)) = player_query.get_single() else {
+    let Ok((player_entity, player_tf, carried, map_id)) = player_query.get_single() else {
         return;
     };
+    if map_id.0 != registry.surface {
+        return;
+    }
 
     let player_pos = player_tf.translation.truncate();
 
-    // Find nearest friendly ant within range
     let mut nearest: Option<(f32, Mut<Ant>)> = None;
     for (tf, ant) in &mut ant_query {
         let dist = player_pos.distance(tf.translation.truncate());
@@ -288,13 +527,18 @@ fn player_regurgitate(
     }
 }
 
+// ── Pheromone systems (work on both maps) ───────────────────────────
+
 fn player_pheromone(
     clock: Res<SimClock>,
     input: Res<ButtonInput<KeyCode>>,
     mode: Res<PlayerMode>,
+    registry: Res<MapRegistry>,
     pconfig: Res<PheromoneConfig>,
+    nest_pconfig: Res<NestPheromoneConfig>,
     mut grids: Option<ResMut<ColonyPheromones>>,
-    query: Query<(&Transform, &ColonyMember), With<PlayerControlled>>,
+    mut nest_phero_query: Query<&mut NestPheromoneGrid, With<MapMarker>>,
+    query: Query<(&Transform, &ColonyMember, &MapId), With<PlayerControlled>>,
 ) {
     if !mode.controlling || clock.speed == SimSpeed::Paused {
         return;
@@ -305,32 +549,45 @@ fn player_pheromone(
         return;
     }
 
-    let Ok((transform, colony)) = query.get_single() else {
+    let Ok((transform, colony, map_id)) = query.get_single() else {
         return;
     };
 
-    let Some(ref mut all_grids) = grids else { return };
-    let Some(grid) = all_grids.get_mut(colony.colony_id) else {
-        return;
-    };
     let pos = transform.translation.truncate();
-    if let Some((gx, gy)) = grid.world_to_grid(pos) {
-        let amt = pconfig.deposit_amount(PheromoneType::Trail) * 3.0;
-        grid.deposit(gx, gy, PheromoneType::Trail, amt, pconfig.max_intensity);
+
+    if map_id.0 == registry.surface {
+        // Surface: deposit Trail into ColonyPheromones.
+        let Some(ref mut all_grids) = grids else { return };
+        let Some(grid) = all_grids.get_mut(colony.colony_id) else { return };
+        if let Some((gx, gy)) = grid.world_to_grid(pos) {
+            let amt = pconfig.deposit_amount(PheromoneType::Trail) * 3.0;
+            grid.deposit(gx, gy, PheromoneType::Trail, amt, pconfig.max_intensity);
+        }
+    } else {
+        // Underground: deposit trail into NestPheromoneGrid.
+        let Ok(mut phero_grid) = nest_phero_query.get_mut(map_id.0) else { return };
+        if let Some((gx, gy)) = world_to_nest_grid(pos) {
+            if let Some(cell) = phero_grid.get_mut(gx, gy) {
+                let amt = pconfig.deposit_amount(PheromoneType::Trail) * 3.0;
+                cell.trail = (cell.trail + amt).min(nest_pconfig.trail_recruit_max);
+            }
+        }
     }
 }
 
 /// Hold R to deposit recruit pheromone (follow or attack, based on current mode)
-/// in a wide area around the player. Nearby ants will sense the gradient and
-/// follow it toward the player.
+/// in a wide area around the player. Works on both surface and underground.
 fn player_recruit_pheromone(
     clock: Res<SimClock>,
     input: Res<ButtonInput<KeyCode>>,
     mode: Res<PlayerMode>,
+    registry: Res<MapRegistry>,
     recruit_mode: Res<RecruitMode>,
     pconfig: Res<PheromoneConfig>,
+    nest_pconfig: Res<NestPheromoneConfig>,
     mut grids: Option<ResMut<ColonyPheromones>>,
-    query: Query<(&Transform, &ColonyMember), With<PlayerControlled>>,
+    mut nest_phero_query: Query<&mut NestPheromoneGrid, With<MapMarker>>,
+    query: Query<(&Transform, &ColonyMember, &MapId), With<PlayerControlled>>,
 ) {
     if !mode.controlling || clock.speed == SimSpeed::Paused {
         return;
@@ -340,90 +597,124 @@ fn player_recruit_pheromone(
         return;
     }
 
-    let Ok((transform, colony)) = query.get_single() else {
+    let Ok((transform, colony, map_id)) = query.get_single() else {
         return;
     };
 
-    let Some(ref mut all_grids) = grids else { return };
-    let Some(grid) = all_grids.get_mut(colony.colony_id) else {
-        return;
-    };
     let pos = transform.translation.truncate();
-    let Some((cx, cy)) = grid.world_to_grid(pos) else {
-        return;
-    };
 
-    let ptype = recruit_mode.pheromone_type();
-    let amt = pconfig.deposit_amount(ptype);
-    for dy in -RECRUIT_DEPOSIT_RADIUS..=RECRUIT_DEPOSIT_RADIUS {
-        for dx in -RECRUIT_DEPOSIT_RADIUS..=RECRUIT_DEPOSIT_RADIUS {
-            let gx = cx as i32 + dx;
-            let gy = cy as i32 + dy;
-            if gx >= 0 && gy >= 0 && (gx as usize) < grid.width && (gy as usize) < grid.height {
-                let dist = ((dx * dx + dy * dy) as f32).sqrt();
-                let falloff = 1.0 / (1.0 + dist);
-                grid.deposit(
-                    gx as usize,
-                    gy as usize,
-                    ptype,
-                    amt * falloff,
-                    pconfig.max_intensity,
-                );
+    if map_id.0 == registry.surface {
+        // Surface deposit.
+        let Some(ref mut all_grids) = grids else { return };
+        let Some(grid) = all_grids.get_mut(colony.colony_id) else { return };
+        let Some((cx, cy)) = grid.world_to_grid(pos) else { return };
+
+        let ptype = recruit_mode.pheromone_type();
+        let amt = pconfig.deposit_amount(ptype);
+        for dy in -RECRUIT_DEPOSIT_RADIUS..=RECRUIT_DEPOSIT_RADIUS {
+            for dx in -RECRUIT_DEPOSIT_RADIUS..=RECRUIT_DEPOSIT_RADIUS {
+                let gx = cx as i32 + dx;
+                let gy = cy as i32 + dy;
+                if gx >= 0 && gy >= 0 && (gx as usize) < grid.width && (gy as usize) < grid.height {
+                    let dist = ((dx * dx + dy * dy) as f32).sqrt();
+                    let falloff = 1.0 / (1.0 + dist);
+                    grid.deposit(
+                        gx as usize,
+                        gy as usize,
+                        ptype,
+                        amt * falloff,
+                        pconfig.max_intensity,
+                    );
+                }
+            }
+        }
+    } else {
+        // Underground deposit — always use Recruit channel in nest grid.
+        let Ok(mut phero_grid) = nest_phero_query.get_mut(map_id.0) else { return };
+        let Some((cx, cy)) = world_to_nest_grid(pos) else { return };
+
+        let amt = pconfig.deposit_amount(PheromoneType::Recruit);
+        let max = nest_pconfig.trail_recruit_max;
+        for dy in -RECRUIT_DEPOSIT_RADIUS..=RECRUIT_DEPOSIT_RADIUS {
+            for dx in -RECRUIT_DEPOSIT_RADIUS..=RECRUIT_DEPOSIT_RADIUS {
+                let gx = cx as i32 + dx;
+                let gy = cy as i32 + dy;
+                if gx >= 0
+                    && gy >= 0
+                    && (gx as usize) < phero_grid.width
+                    && (gy as usize) < phero_grid.height
+                {
+                    let dist = ((dx * dx + dy * dy) as f32).sqrt();
+                    let falloff = 1.0 / (1.0 + dist);
+                    if let Some(cell) = phero_grid.get_mut(gx as usize, gy as usize) {
+                        cell.recruit = (cell.recruit + amt * falloff).min(max);
+                    }
+                }
             }
         }
     }
 }
 
-/// Press T to clear both Recruit and AttackRecruit pheromone for this colony,
-/// dismissing all followers regardless of mode.
+/// Press T to clear recruit pheromone, dismissing followers. Works on both maps.
 fn player_dismiss_pheromone(
     input: Res<ButtonInput<KeyCode>>,
     mode: Res<PlayerMode>,
+    registry: Res<MapRegistry>,
     mut grids: Option<ResMut<ColonyPheromones>>,
-    query: Query<&ColonyMember, With<PlayerControlled>>,
+    mut nest_phero_query: Query<&mut NestPheromoneGrid, With<MapMarker>>,
+    query: Query<(&ColonyMember, &MapId), With<PlayerControlled>>,
 ) {
     if !mode.controlling || !input.just_pressed(KeyCode::KeyT) {
         return;
     }
 
-    let Ok(colony) = query.get_single() else {
+    let Ok((colony, map_id)) = query.get_single() else {
         return;
     };
 
-    let Some(ref mut all_grids) = grids else { return };
-    let Some(grid) = all_grids.get_mut(colony.colony_id) else {
-        return;
-    };
-
-    for y in 0..grid.height {
-        for x in 0..grid.width {
-            grid.clear_type(x, y, PheromoneType::Recruit);
-            grid.clear_type(x, y, PheromoneType::AttackRecruit);
+    if map_id.0 == registry.surface {
+        let Some(ref mut all_grids) = grids else { return };
+        let Some(grid) = all_grids.get_mut(colony.colony_id) else { return };
+        for y in 0..grid.height {
+            for x in 0..grid.width {
+                grid.clear_type(x, y, PheromoneType::Recruit);
+                grid.clear_type(x, y, PheromoneType::AttackRecruit);
+            }
+        }
+    } else {
+        let Ok(mut phero_grid) = nest_phero_query.get_mut(map_id.0) else { return };
+        for cell in &mut phero_grid.cells {
+            cell.recruit = 0.0;
         }
     }
 }
+
+// ── Exchange / swap ant ─────────────────────────────────────────────
 
 fn exchange_ant(
     input: Res<ButtonInput<KeyCode>>,
     mode: Res<PlayerMode>,
     registry: Res<MapRegistry>,
     mut commands: Commands,
-    player_query: Query<(Entity, &Transform), With<PlayerControlled>>,
+    player_query: Query<(Entity, &Transform, &MapId), With<PlayerControlled>>,
     candidate_query: Query<(Entity, &Transform, &MapId), (With<Ant>, Without<PlayerControlled>)>,
 ) {
     if !mode.controlling || !input.just_pressed(KeyCode::KeyX) {
         return;
     }
 
-    let Ok((player_entity, player_tf)) = player_query.get_single() else {
+    let Ok((player_entity, player_tf, player_map)) = player_query.get_single() else {
         return;
     };
+    // Only swap to surface ants when on surface.
+    if player_map.0 != registry.surface {
+        return;
+    }
 
     let player_pos = player_tf.translation.truncate();
     let mut nearest: Option<(Entity, f32)> = None;
 
     for (entity, tf, map_id) in &candidate_query {
-        // Only swap to surface ants.
         if map_id.0 != registry.surface {
             continue;
         }
@@ -438,6 +729,8 @@ fn exchange_ant(
         commands.entity(new_entity).insert(PlayerControlled);
     }
 }
+
+// ── Common systems ──────────────────────────────────────────────────
 
 fn update_follower_count(
     mut count: ResMut<FollowerCount>,

@@ -1,8 +1,10 @@
 use bevy::prelude::*;
 use bevy::input::mouse::MouseWheel;
 
+use crate::components::map::MapKind;
 use crate::plugins::player::PlayerMode;
-use crate::resources::active_map::viewing_surface;
+use crate::resources::active_map::ActiveMap;
+use crate::resources::nest::{NEST_CELL_SIZE, NEST_HEIGHT, NEST_WIDTH};
 use crate::resources::simulation::SimConfig;
 
 pub struct CameraPlugin;
@@ -12,9 +14,7 @@ impl Plugin for CameraPlugin {
         app.add_systems(Startup, setup_camera)
             .add_systems(
                 Update,
-                (camera_pan, camera_zoom, camera_clamp)
-                    .chain()
-                    .run_if(viewing_surface),
+                (camera_pan, camera_zoom, camera_clamp).chain(),
             );
     }
 }
@@ -93,18 +93,24 @@ fn camera_zoom(
 
 fn camera_clamp(
     config: Res<SimConfig>,
+    active: Option<Res<ActiveMap>>,
     mut query: Query<&mut Transform, With<MainCamera>>,
 ) {
     let Ok(mut transform) = query.get_single_mut() else {
         return;
     };
 
-    transform.translation.x = transform
-        .translation
-        .x
-        .clamp(0.0, config.world_width);
-    transform.translation.y = transform
-        .translation
-        .y
-        .clamp(0.0, config.world_height);
+    let is_nest = active
+        .as_ref()
+        .map_or(false, |a| matches!(a.kind, MapKind::Nest { .. }));
+
+    if is_nest {
+        let half_w = (NEST_WIDTH as f32 * NEST_CELL_SIZE) / 2.0;
+        let half_h = (NEST_HEIGHT as f32 * NEST_CELL_SIZE) / 2.0;
+        transform.translation.x = transform.translation.x.clamp(-half_w, half_w);
+        transform.translation.y = transform.translation.y.clamp(-half_h, half_h);
+    } else {
+        transform.translation.x = transform.translation.x.clamp(0.0, config.world_width);
+        transform.translation.y = transform.translation.y.clamp(0.0, config.world_height);
+    }
 }

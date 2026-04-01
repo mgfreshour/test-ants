@@ -1,15 +1,20 @@
 use bevy::prelude::*;
 
-use crate::components::map::{MapId, MapMarker};
+use crate::components::map::{MapId, MapMarker, MapPortal};
 use crate::components::nest::{Brood, BroodStage, CellType, Queen};
 use crate::components::map::MapKind;
-use crate::resources::active_map::{ActiveMap, viewing_nest};
+use crate::resources::active_map::{ActiveMap, MapRegistry, viewing_nest};
 use crate::resources::nest::{NestGrid, NEST_CELL_SIZE, NEST_HEIGHT, NEST_WIDTH};
 use crate::resources::nest_pheromone::{
     chamber_kind_to_label, NestPheromoneConfig, NestPheromoneGrid,
     LABEL_ENTRANCE,
 };
+use crate::resources::pheromone::{ColonyPheromones, PheromoneConfig};
+use crate::components::pheromone::PheromoneType;
 use crate::resources::simulation::{SimClock, SimSpeed};
+
+/// Fraction of pheromone intensity transferred through a portal per tick.
+const BRIDGE_TRANSFER_RATE: f32 = 0.3;
 
 pub struct NestPheromonePlugin;
 
@@ -25,8 +30,10 @@ impl Plugin for NestPheromonePlugin {
                     nest_pheromone_decay,
                     queen_signal_emission,
                     nest_queen_signal_diffusion,
+                    nest_trail_recruit_diffusion,
                     brood_need_emission,
                     chamber_label_refresh,
+                    portal_pheromone_bridge,
                 )
                     .chain(),
             )
@@ -149,6 +156,88 @@ fn chamber_label_refresh(
     }
 }
 
+// ── Trail/Recruit diffusion ─────────────────────────────────────────
+
+/// Diffuse trail and recruit pheromones through passable cells in each nest map.
+fn nest_trail_recruit_diffusion(
+    clock: Res<SimClock>,
+    config: Res<NestPheromoneConfig>,
+    mut map_query: Query<(&NestGrid, &mut NestPheromoneGrid), With<MapMarker>>,
+) {
+    if clock.speed == SimSpeed::Paused {
+        return;
+    }
+    for (nest_grid, mut phero_grid) in &mut map_query {
+        phero_grid.diffuse_trail_recruit(
+            nest_grid,
+            config.trail_diffuse_rate,
+            config.recruit_diffuse_rate,
+            config.trail_recruit_max,
+        );
+    }
+}
+
+// ── Portal pheromone bridge ─────────────────────────────────────────
+
+/// Transfer Trail and Recruit pheromone between surface and nest grids through portals.
+fn portal_pheromone_bridge(
+    clock: Res<SimClock>,
+    registry: Res<MapRegistry>,
+    pconfig: Res<PheromoneConfig>,
+    nest_pconfig: Res<NestPheromoneConfig>,
+    portal_query: Query<&MapPortal>,
+    mut grids: Option<ResMut<ColonyPheromones>>,
+    mut nest_phero_query: Query<&mut NestPheromoneGrid, With<MapMarker>>,
+) {
+    if clock.speed == SimSpeed::Paused {
+        return;
+    }
+
+    let Some(ref mut all_grids) = grids else { return };
+
+    for portal in &portal_query {
+        let colony_id = portal.colony_id.unwrap_or(0);
+
+        if portal.map == registry.surface {
+            // Surface → Nest: read surface pheromone, write to nest.
+            let Some(surface_grid) = all_grids.get(colony_id) else { continue };
+            let Some((sx, sy)) = surface_grid.world_to_grid(portal.position) else { continue };
+            let trail_val = surface_grid.get(sx, sy, PheromoneType::Trail);
+            let recruit_val = surface_grid.get(sx, sy, PheromoneType::Recruit);
+
+            if trail_val < 0.01 && recruit_val < 0.01 {
+                continue;
+            }
+
+            let Ok(mut nest_grid) = nest_phero_query.get_mut(portal.target_map) else { continue };
+            let Some((nx, ny)) = world_to_nest_grid(portal.target_position) else { continue };
+
+            if let Some(cell) = nest_grid.get_mut(nx, ny) {
+                let max = nest_pconfig.trail_recruit_max;
+                cell.trail = (cell.trail + trail_val * BRIDGE_TRANSFER_RATE).min(max);
+                cell.recruit = (cell.recruit + recruit_val * BRIDGE_TRANSFER_RATE).min(max);
+            }
+        } else if portal.target_map == registry.surface {
+            // Nest → Surface: read nest pheromone, write to surface.
+            let Ok(nest_grid) = nest_phero_query.get(portal.map) else { continue };
+            let Some((nx, ny)) = world_to_nest_grid(portal.position) else { continue };
+            let cell = nest_grid.get(nx, ny);
+            let trail_val = cell.trail;
+            let recruit_val = cell.recruit;
+
+            if trail_val < 0.01 && recruit_val < 0.01 {
+                continue;
+            }
+
+            let Some(surface_grid) = all_grids.get_mut(colony_id) else { continue };
+            let Some((sx, sy)) = surface_grid.world_to_grid(portal.target_position) else { continue };
+            let max = pconfig.max_intensity;
+            surface_grid.deposit(sx, sy, PheromoneType::Trail, trail_val * BRIDGE_TRANSFER_RATE, max);
+            surface_grid.deposit(sx, sy, PheromoneType::Recruit, recruit_val * BRIDGE_TRANSFER_RATE, max);
+        }
+    }
+}
+
 // ── Overlay ──────────────────────────────────────────────────────────
 
 #[derive(Resource, Default)]
@@ -261,6 +350,14 @@ fn update_overlay_visuals(
 
         let cp = cell.construction;
         if cp > 0.01 { r += cp * 0.9; g += cp * 0.5; a += cp * 0.5; }
+
+        // Trail pheromone (yellow)
+        let tr = cell.trail;
+        if tr > 0.01 { r += tr * 0.01; g += tr * 0.009; a += tr * 0.005; }
+
+        // Recruit pheromone (cyan)
+        let rc = cell.recruit;
+        if rc > 0.01 { g += rc * 0.009; b += rc * 0.01; a += rc * 0.005; }
 
         let max_label = cell.chamber_labels.iter().cloned().fold(0.0f32, f32::max);
         if max_label > 0.1 {

@@ -276,8 +276,9 @@ fn portal_transition(
             // Entering a nest — apply throttle based on sliders.
             let target_is_nest = portal.target_map != registry.surface;
             if target_is_nest {
-                // Small random chance per frame to prevent all entering at once.
-                if !regressions::should_enter_nest(
+                let is_following = ant.state == AntState::Following;
+                // Following ants bypass the throttle — they were recruited by the player.
+                if !is_following && !regressions::should_enter_nest(
                     current_underground,
                     desired_underground,
                     ant.state == AntState::Foraging,
@@ -287,7 +288,7 @@ fn portal_transition(
                     break;
                 }
 
-                ant.state = AntState::Nursing;
+                ant.state = if is_following { AntState::Following } else { AntState::Nursing };
                 map_id.0 = portal.target_map;
                 transform.translation.x = portal.target_position.x;
                 transform.translation.y = portal.target_position.y;
@@ -295,8 +296,17 @@ fn portal_transition(
                 *vis = Visibility::Hidden;
                 commands.entity(entity).insert(NestTask::Idle { timer: 0.0 });
             } else {
-                // Exiting a nest — handled by nest_to_surface_transition when idle.
-                // Portal exits are triggered there to preserve the idle-timeout logic.
+                // Exiting a nest — Following ants leave immediately.
+                if ant.state == AntState::Following {
+                    ant.state = AntState::Following;
+                    map_id.0 = portal.target_map;
+                    transform.translation.x = portal.target_position.x + rng.gen_range(-15.0..15.0f32);
+                    transform.translation.y = portal.target_position.y + rng.gen_range(-15.0..15.0f32);
+                    *vis = Visibility::Inherited;
+                    commands.entity(entity).remove::<NestTask>();
+                    commands.entity(entity).remove::<NestPath>();
+                }
+                // Non-following ants: handled by nest_to_surface_transition when idle.
             }
             break;
         }

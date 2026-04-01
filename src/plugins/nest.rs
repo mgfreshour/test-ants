@@ -16,7 +16,7 @@ use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 pub struct NestPlugin;
 
 
-const QUEEN_EGG_INTERVAL: f32 = 10.0;
+const QUEEN_EGG_INTERVAL: f32 = 5.0;
 /// Satiation consumed per egg (5 eggs from a full queen).
 const EGG_SATIATION_COST: f32 = 0.2;
 /// Grace period at 0 satiation before starvation damage starts.
