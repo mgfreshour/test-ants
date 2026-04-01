@@ -47,6 +47,22 @@ pub fn apply_deposit_hunger_relief(hunger: f32, relief: f32) -> f32 {
     (hunger - relief).max(0.0)
 }
 
+pub fn pickup_food_amount(food_remaining: f32, max_pickup: f32) -> Option<f32> {
+    if food_remaining <= 0.0 {
+        None
+    } else {
+        Some(food_remaining.min(max_pickup))
+    }
+}
+
+pub fn can_pickup_food(state_is_foraging: bool, distance: f32, pickup_range: f32) -> bool {
+    state_is_foraging && distance < pickup_range
+}
+
+pub fn can_deposit_food(state_is_returning: bool, is_surface_ant: bool, distance_to_portal: f32, deposit_range: f32) -> bool {
+    state_is_returning && is_surface_ant && distance_to_portal < deposit_range
+}
+
 pub fn apply_boundary_bounce(pos: Vec2, dir: Vec2, min: Vec2, max: Vec2) -> (Vec2, Vec2) {
     let mut next_pos = pos;
     let mut next_dir = dir;
@@ -111,5 +127,24 @@ mod tests {
     fn deposit_relief_never_goes_below_zero() {
         assert_eq!(apply_deposit_hunger_relief(0.2, 0.5), 0.0);
         assert_eq!(apply_deposit_hunger_relief(0.8, 0.3), 0.5);
+    }
+
+    #[test]
+    fn pickup_amount_is_bounded() {
+        assert_eq!(pickup_food_amount(0.0, 5.0), None);
+        assert_eq!(pickup_food_amount(3.0, 5.0), Some(3.0));
+        assert_eq!(pickup_food_amount(8.0, 5.0), Some(5.0));
+    }
+
+    #[test]
+    fn pickup_and_deposit_conditions_match_state_and_range() {
+        assert!(can_pickup_food(true, 5.0, 20.0));
+        assert!(!can_pickup_food(false, 5.0, 20.0));
+        assert!(!can_pickup_food(true, 25.0, 20.0));
+
+        assert!(can_deposit_food(true, true, 10.0, 30.0));
+        assert!(!can_deposit_food(true, false, 10.0, 30.0));
+        assert!(!can_deposit_food(false, true, 10.0, 30.0));
+        assert!(!can_deposit_food(true, true, 35.0, 30.0));
     }
 }

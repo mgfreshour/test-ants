@@ -426,21 +426,16 @@ fn food_detection_and_pickup(
     }
 
     for (ant_entity, ant_transform, mut ant, mut history) in &mut ant_query {
-        if ant.state != AntState::Foraging {
-            continue;
-        }
-
         let ant_pos = ant_transform.translation.truncate();
 
         for (food_transform, mut food) in &mut food_query {
-            if food.remaining <= 0.0 {
-                continue;
-            }
             let food_pos = food_transform.translation.truncate();
             let dist = ant_pos.distance(food_pos);
 
-            if dist < FOOD_PICKUP_RANGE {
-                let amount = food.remaining.min(5.0);
+            if ant_logic::can_pickup_food(ant.state == AntState::Foraging, dist, FOOD_PICKUP_RANGE) {
+                let Some(amount) = ant_logic::pickup_food_amount(food.remaining, 5.0) else {
+                    continue;
+                };
                 food.remaining -= amount;
                 commands.entity(ant_entity).insert(CarriedItem { food_amount: amount });
                 ant.state = AntState::Returning;
@@ -475,7 +470,8 @@ fn nest_food_deposit(
         }
 
         // Only surface ants deposit food at portals.
-        if map_id.0 != registry.surface {
+        let is_surface_ant = map_id.0 == registry.surface;
+        if !is_surface_ant {
             continue;
         }
 
@@ -485,7 +481,12 @@ fn nest_food_deposit(
         let deposit_target = portal_query.iter().find(|p| {
             p.map == registry.surface
                 && p.colony_id.map_or(true, |id| id == colony.colony_id)
-                && ant_pos.distance(p.position) < NEST_DEPOSIT_RANGE
+                && ant_logic::can_deposit_food(
+                    ant.state == AntState::Returning,
+                    is_surface_ant,
+                    ant_pos.distance(p.position),
+                    NEST_DEPOSIT_RANGE,
+                )
         });
 
         if let Some(portal) = deposit_target {

@@ -46,7 +46,7 @@ Do not test:
        Why: protects foundational timing assumptions used by all systems.
 9. [x] **W9 (P1/M)** Add unit tests for hunger/starvation/food-relief rules.  
        Why: captures critical survival and economy interactions.
-10. [ ] **W10 (P1/M)** Add unit tests for food pickup/deposit and state transitions.  
+10. [x] **W10 (P1/M)** Add unit tests for food pickup/deposit and state transitions.  
         Why: verifies main foraging loop correctness.
 11. [ ] **W11 (P1/M)** Add unit tests for pheromone decision/deposit logic by ant state.  
         Why: prevents regressions in trail formation behavior.
