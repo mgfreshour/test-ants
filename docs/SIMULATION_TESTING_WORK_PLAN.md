@@ -28,7 +28,7 @@ Do not test:
 
 ## Ordered Checklist (Refactors First, Then Tests)
 
-1. [ ] **W1 (P0/S)** Define simulation-test charter and boundaries in-repo.  
+1. [x] **W1 (P0/S)** Define simulation-test charter and boundaries in-repo.  
        Why: prevents accidental UI test scope creep and aligns contributors.
 2. [ ] **W2 (P0/L) - REFACTOR** Create `sim_core` module for pure simulation functions (no `Commands`, `Sprite`, `Text2d`).  
        Why: establishes testable seams for logic currently embedded in ECS systems.
