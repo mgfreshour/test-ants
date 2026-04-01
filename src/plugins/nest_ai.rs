@@ -14,7 +14,7 @@ use crate::resources::colony::BehaviorSliders;
 use crate::resources::nest::{NestGrid, PlayerDigZones, TileStackRegistry, stack_position_offset, NEST_WIDTH};
 use crate::resources::nest_pathfinding::NestPathCache;
 use crate::resources::nest_pheromone::{
-    NestPheromoneGrid, LABEL_BROOD, LABEL_ENTRANCE, LABEL_FOOD_STORAGE, LABEL_MIDDEN, LABEL_QUEEN,
+    NestPheromoneGrid, LABEL_BROOD, LABEL_ENTRANCE, LABEL_FOOD_STORAGE, LABEL_QUEEN,
 };
 use crate::resources::simulation::{SimClock, SimSpeed};
 use crate::sim_core::regressions;
@@ -31,8 +31,10 @@ impl Plugin for NestAiPlugin {
                 (
                     apply_brood_fed,
                     apply_brood_relocated,
+                    apply_deferred_zone_expansions,
                     cleanup_orphaned_carried_items,
                     update_carried_item_positions,
+                    apply_zone_expansions,
                     apply_excavated_cells,
                     portal_transition,
                     nest_to_surface_transition,
@@ -73,7 +75,28 @@ fn apply_brood_relocated(
     for (entity, mut brood, mut transform) in &mut query {
         brood.relocated = true;
 
-        if let Some(tile_pos) = stack_registry.find_available_tile(&grid, ChamberKind::Brood) {
+        let tile_pos = stack_registry
+            .find_available_tile(&grid, ChamberKind::Brood)
+            .or_else(|| {
+                grid.find_expansion_candidate(ChamberKind::Brood).map(|exp| {
+                    // Immediately expand the zone inline since we have mutable access
+                    // The grid is immutable here, so we'll mark for deferred expansion
+                    (exp.x, exp.y)
+                })
+            });
+
+        if let Some(tile_pos) = tile_pos {
+            // Check if this is an expansion (tile is currently a tunnel)
+            if grid.get(tile_pos.0, tile_pos.1) == CellType::Tunnel {
+                // Mark for expansion - will be processed by apply_zone_expansions
+                commands.spawn(ExpandZoneDeferred {
+                    x: tile_pos.0,
+                    y: tile_pos.1,
+                    chamber: ChamberKind::Brood,
+                    map: registry.player_nest,
+                });
+            }
+
             if let Some(stack_idx) = stack_registry.push(tile_pos, entity) {
                 let base_pos = nest_grid_to_world(tile_pos.0, tile_pos.1);
                 let offset = stack_position_offset(stack_idx);
@@ -92,10 +115,54 @@ fn apply_brood_relocated(
     }
 }
 
-// ── Constants ──────────────────────────────────────────────────────────
+/// Deferred zone expansion marker (spawned as entity, not component on ant).
+#[derive(Component)]
+struct ExpandZoneDeferred {
+    x: usize,
+    y: usize,
+    chamber: ChamberKind,
+    map: Entity,
+}
 
-/// How close an ant needs to be to a chamber cell to count as "arrived".
-const ARRIVAL_THRESHOLD: f32 = 12.0;
+/// Process deferred zone expansions from brood relocation.
+fn apply_deferred_zone_expansions(
+    mut commands: Commands,
+    mut map_query: Query<(&mut NestGrid, &mut NestPathCache, &mut NestPheromoneGrid), With<MapMarker>>,
+    query: Query<(Entity, &ExpandZoneDeferred)>,
+    mut tile_query: Query<(&crate::components::nest::NestTile, &mut Sprite, &MapId)>,
+) {
+    use crate::resources::nest_pheromone::chamber_kind_to_label;
+
+    for (entity, expand) in &query {
+        let Ok((mut grid, mut path_cache, mut phero_grid)) = map_query.get_mut(expand.map) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+
+        let (x, y) = (expand.x, expand.y);
+        let chamber = expand.chamber;
+
+        if grid.get(x, y) == CellType::Tunnel {
+            grid.set(x, y, CellType::Chamber(chamber));
+            path_cache.invalidate();
+
+            if let Some(phero) = phero_grid.get_mut(x, y) {
+                let label_idx = chamber_kind_to_label(chamber);
+                phero.chamber_labels[label_idx] = 1.0;
+            }
+
+            for (tile, mut sprite, tile_map_id) in &mut tile_query {
+                if tile_map_id.0 == expand.map && tile.grid_x == x && tile.grid_y == y {
+                    sprite.color = CellType::Chamber(chamber).color();
+                    break;
+                }
+            }
+        }
+        commands.entity(entity).despawn();
+    }
+}
+
+// ── Constants ──────────────────────────────────────────────────────────
 
 /// How often nest ants re-evaluate their task (seconds).
 const REEVALUATE_INTERVAL: f32 = 2.0;
@@ -811,7 +878,21 @@ fn nest_task_advance(
 
                             if let Some((food_e, _)) = carried_food {
                                 // Stack in food storage chamber
-                                if let Some(tile_pos) = stack_registry.find_available_tile(&grid, ChamberKind::FoodStorage) {
+                                let tile_pos = stack_registry
+                                    .find_available_tile(&grid, ChamberKind::FoodStorage)
+                                    .or_else(|| {
+                                        grid.find_expansion_candidate(ChamberKind::FoodStorage)
+                                            .map(|exp| {
+                                                commands.entity(entity).insert(ExpandZone {
+                                                    x: exp.x,
+                                                    y: exp.y,
+                                                    chamber: ChamberKind::FoodStorage,
+                                                });
+                                                (exp.x, exp.y)
+                                            })
+                                    });
+
+                                if let Some(tile_pos) = tile_pos {
                                     if let Some(stack_idx) = stack_registry.push(tile_pos, food_e) {
                                         let base_pos = nest_grid_to_world(tile_pos.0, tile_pos.1);
                                         let offset = stack_position_offset(stack_idx);
@@ -826,7 +907,7 @@ fn nest_task_advance(
                                         commands.entity(food_e).remove::<CarriedBy>();
                                     }
                                 } else {
-                                    // No available tiles, drop at current location
+                                    // No available tiles and no expansion possible, drop at current location
                                     commands.entity(food_e).remove::<CarriedBy>();
                                 }
                             }
@@ -1106,6 +1187,54 @@ fn cleanup_orphaned_carried_items(
 struct ExcavatedCell {
     x: usize,
     y: usize,
+}
+
+/// Marker component: a tunnel cell should be converted to a chamber to expand a zone.
+#[derive(Component)]
+struct ExpandZone {
+    x: usize,
+    y: usize,
+    chamber: ChamberKind,
+}
+
+// ── Zone Expansion ───────────────────────────────────────────────────
+
+/// Process ExpandZone markers: convert tunnel cells to chambers, update sprites and pheromones.
+fn apply_zone_expansions(
+    mut commands: Commands,
+    mut map_query: Query<(&mut NestGrid, &mut NestPathCache, &mut NestPheromoneGrid), With<MapMarker>>,
+    mut query: Query<(Entity, &ExpandZone, &MapId)>,
+    mut tile_query: Query<(&crate::components::nest::NestTile, &mut Sprite, &MapId), Without<ExpandZone>>,
+) {
+    use crate::resources::nest_pheromone::chamber_kind_to_label;
+
+    for (entity, expand, map_id) in &mut query {
+        let Ok((mut grid, mut path_cache, mut phero_grid)) = map_query.get_mut(map_id.0) else {
+            commands.entity(entity).remove::<ExpandZone>();
+            continue;
+        };
+
+        let (x, y) = (expand.x, expand.y);
+        let chamber = expand.chamber;
+
+        if grid.get(x, y) == CellType::Tunnel {
+            grid.set(x, y, CellType::Chamber(chamber));
+            path_cache.invalidate();
+
+            if let Some(phero) = phero_grid.get_mut(x, y) {
+                let label_idx = chamber_kind_to_label(chamber);
+                phero.chamber_labels[label_idx] = 1.0;
+            }
+
+            for (tile, mut sprite, tile_map_id) in &mut tile_query {
+                if tile_map_id.0 == map_id.0 && tile.grid_x == x && tile.grid_y == y {
+                    sprite.color = CellType::Chamber(chamber).color();
+                    break;
+                }
+            }
+        }
+        commands.entity(entity).remove::<ExpandZone>();
+    }
 }
 
 // ── Excavation Grid Mutation ─────────────────────────────────────────

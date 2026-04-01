@@ -178,6 +178,65 @@ impl TileStackRegistry {
     }
 }
 
+/// Result of attempting to expand a chamber zone.
+pub struct ZoneExpansion {
+    pub x: usize,
+    pub y: usize,
+}
+
+impl NestGrid {
+    /// Find a tunnel cell suitable for expanding into a new chamber of the given kind.
+    /// Prefers tunnels adjacent to existing chambers of the same type at similar depth.
+    /// Returns the position of the tunnel to convert, if found.
+    pub fn find_expansion_candidate(&self, chamber: ChamberKind) -> Option<ZoneExpansion> {
+        let existing_cells: Vec<(usize, usize)> = (0..self.height)
+            .flat_map(|y| (0..self.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| self.get(x, y) == CellType::Chamber(chamber))
+            .collect();
+
+        if existing_cells.is_empty() {
+            return None;
+        }
+
+        let avg_y: usize = existing_cells.iter().map(|&(_, y)| y).sum::<usize>() / existing_cells.len();
+        let depth_tolerance: i32 = 3;
+
+        let mut candidates: Vec<((usize, usize), i32)> = Vec::new();
+
+        for y in 0..self.height {
+            let depth_diff = (y as i32 - avg_y as i32).abs();
+            if depth_diff > depth_tolerance {
+                continue;
+            }
+
+            for x in 0..self.width {
+                if self.get(x, y) != CellType::Tunnel {
+                    continue;
+                }
+
+                let adjacent_chamber_count = [(-1i32, 0), (1, 0), (0, -1i32), (0, 1)]
+                    .iter()
+                    .filter(|&&(dx, dy)| {
+                        let nx = x as i32 + dx;
+                        let ny = y as i32 + dy;
+                        nx >= 0
+                            && ny >= 0
+                            && (nx as usize) < self.width
+                            && (ny as usize) < self.height
+                            && self.get(nx as usize, ny as usize) == CellType::Chamber(chamber)
+                    })
+                    .count() as i32;
+
+                let score = adjacent_chamber_count * 10 - depth_diff;
+                candidates.push(((x, y), score));
+            }
+        }
+
+        candidates.sort_by(|a, b| b.1.cmp(&a.1));
+        candidates.first().map(|&((x, y), _)| ZoneExpansion { x, y })
+    }
+}
+
 pub fn stack_position_offset(index: u8) -> Vec2 {
     let offset = NEST_CELL_SIZE * 0.3;
     match index {
@@ -187,5 +246,135 @@ pub fn stack_position_offset(index: u8) -> Vec2 {
         3 => Vec2::new(-offset, -offset),
         4 => Vec2::new(offset, -offset),
         _ => Vec2::ZERO,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test_grid(width: usize, height: usize) -> NestGrid {
+        NestGrid {
+            width,
+            height,
+            cells: vec![vec![CellType::Soil; width]; height],
+        }
+    }
+
+    #[test]
+    fn find_expansion_returns_none_when_no_existing_chambers() {
+        let grid = make_test_grid(10, 10);
+        assert!(grid.find_expansion_candidate(ChamberKind::FoodStorage).is_none());
+    }
+
+    #[test]
+    fn find_expansion_returns_none_when_no_tunnels_nearby() {
+        let mut grid = make_test_grid(10, 10);
+        grid.cells[5][5] = CellType::Chamber(ChamberKind::FoodStorage);
+        assert!(grid.find_expansion_candidate(ChamberKind::FoodStorage).is_none());
+    }
+
+    #[test]
+    fn find_expansion_prefers_adjacent_tunnel() {
+        let mut grid = make_test_grid(10, 10);
+        grid.cells[5][5] = CellType::Chamber(ChamberKind::FoodStorage);
+        grid.cells[5][6] = CellType::Tunnel; // adjacent
+        grid.cells[5][8] = CellType::Tunnel; // not adjacent
+
+        let result = grid.find_expansion_candidate(ChamberKind::FoodStorage);
+        assert!(result.is_some());
+        let exp = result.unwrap();
+        assert_eq!((exp.x, exp.y), (6, 5)); // should pick adjacent tunnel
+    }
+
+    #[test]
+    fn find_expansion_respects_depth_tolerance() {
+        let mut grid = make_test_grid(10, 15);
+        grid.cells[5][5] = CellType::Chamber(ChamberKind::Brood);
+        grid.cells[5][6] = CellType::Chamber(ChamberKind::Brood);
+        // avg_y = 5, tolerance = 3, so y in [2, 8] allowed
+        grid.cells[12][5] = CellType::Tunnel; // too far (depth 12, diff = 7)
+        grid.cells[7][5] = CellType::Tunnel;  // within tolerance (depth 7, diff = 2)
+
+        let result = grid.find_expansion_candidate(ChamberKind::Brood);
+        assert!(result.is_some());
+        let exp = result.unwrap();
+        assert_eq!(exp.y, 7); // should pick tunnel within depth tolerance
+    }
+
+    #[test]
+    fn find_expansion_scores_by_adjacency_and_depth() {
+        let mut grid = make_test_grid(10, 10);
+        // cells[y][x], so chambers at (3,5) and (5,5), tunnel at (4,5) between them
+        grid.cells[5][3] = CellType::Chamber(ChamberKind::FoodStorage);
+        grid.cells[5][5] = CellType::Chamber(ChamberKind::FoodStorage);
+        grid.cells[5][4] = CellType::Tunnel; // adjacent to 2 chambers (at x=3 and x=5)
+        grid.cells[5][2] = CellType::Tunnel; // adjacent to 1 chamber (at x=3)
+        grid.cells[6][3] = CellType::Tunnel; // adjacent to 1 chamber but different y
+
+        let result = grid.find_expansion_candidate(ChamberKind::FoodStorage);
+        assert!(result.is_some());
+        let exp = result.unwrap();
+        // (4, 5) has 2 adjacent chambers, should score highest
+        assert_eq!((exp.x, exp.y), (4, 5));
+    }
+
+    #[test]
+    fn find_expansion_only_considers_matching_chamber_type() {
+        let mut grid = make_test_grid(10, 10);
+        grid.cells[5][5] = CellType::Chamber(ChamberKind::FoodStorage);
+        grid.cells[5][6] = CellType::Tunnel;
+
+        // Looking for Brood expansion should find nothing (no Brood chambers exist)
+        assert!(grid.find_expansion_candidate(ChamberKind::Brood).is_none());
+
+        // Looking for FoodStorage expansion should find the tunnel
+        assert!(grid.find_expansion_candidate(ChamberKind::FoodStorage).is_some());
+    }
+
+    #[test]
+    fn find_available_tile_returns_chamber_with_space() {
+        let mut grid = make_test_grid(10, 10);
+        grid.cells[5][5] = CellType::Chamber(ChamberKind::FoodStorage);
+
+        let registry = TileStackRegistry::default();
+        let result = registry.find_available_tile(&grid, ChamberKind::FoodStorage);
+        assert_eq!(result, Some((5, 5)));
+    }
+
+    #[test]
+    fn find_available_tile_returns_none_when_all_full() {
+        let mut grid = make_test_grid(10, 10);
+        grid.cells[5][5] = CellType::Chamber(ChamberKind::FoodStorage);
+
+        let mut registry = TileStackRegistry::default();
+        // Fill up with 5 items (the max per tile)
+        for i in 0..5 {
+            registry.push((5, 5), Entity::from_raw(i));
+        }
+
+        let result = registry.find_available_tile(&grid, ChamberKind::FoodStorage);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn stack_registry_push_respects_limit() {
+        let mut registry = TileStackRegistry::default();
+        for i in 0..5 {
+            assert!(registry.push((0, 0), Entity::from_raw(i)).is_some());
+        }
+        // 6th push should fail
+        assert!(registry.push((0, 0), Entity::from_raw(5)).is_none());
+    }
+
+    #[test]
+    fn stack_registry_remove_cleans_up_empty_stacks() {
+        let mut registry = TileStackRegistry::default();
+        let e = Entity::from_raw(1);
+        registry.push((0, 0), e);
+        assert!(registry.stacks.contains_key(&(0, 0)));
+
+        registry.remove((0, 0), e);
+        assert!(!registry.stacks.contains_key(&(0, 0)));
     }
 }
