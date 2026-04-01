@@ -116,3 +116,55 @@ pub struct NestTestAnt {
     /// Timer for picking a new destination after reaching current one.
     pub retarget_timer: f32,
 }
+
+/// Task assigned to a nest ant by the utility AI.
+#[derive(Component, Debug, Clone)]
+pub enum NestTask {
+    FeedLarva { step: FeedStep, target_larva: Option<Entity> },
+    HaulFood { step: HaulStep },
+    AttendQueen { step: AttendStep },
+    Idle { timer: f32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeedStep {
+    GoToStorage,
+    PickUpFood,
+    GoToBrood,
+    FindLarva,
+    DeliverFood,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HaulStep {
+    GoToEntrance,
+    PickUpFood,
+    GoToStorage,
+    DropFood,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttendStep {
+    GoToQueen,
+    Grooming,
+}
+
+impl NestTask {
+    pub fn label(&self) -> &'static str {
+        match self {
+            NestTask::FeedLarva { .. } => "N",
+            NestTask::HaulFood { .. } => "H",
+            NestTask::AttendQueen { .. } => "Q",
+            NestTask::Idle { .. } => "I",
+        }
+    }
+
+    pub fn color(&self) -> Color {
+        match self {
+            NestTask::FeedLarva { .. } => Color::srgb(0.8, 0.6, 1.0),
+            NestTask::HaulFood { .. } => Color::srgb(0.6, 0.9, 0.3),
+            NestTask::AttendQueen { .. } => Color::srgb(1.0, 0.8, 0.2),
+            NestTask::Idle { .. } => Color::srgba(1.0, 1.0, 1.0, 0.4),
+        }
+    }
+}
