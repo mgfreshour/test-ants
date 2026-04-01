@@ -2,10 +2,14 @@ use bevy::prelude::*;
 use rand::Rng;
 
 use crate::components::ant::{Ant, Caste, ColonyMember, Health, Movement, PositionHistory, TrailSense};
-use crate::components::nest::{Brood, BroodStage, CellType, NestTile, Queen};
+use crate::components::nest::{Brood, BroodStage, CellType, NestPath, NestTestAnt, NestTile, Queen};
 use crate::plugins::ant_ai::ColonyFood;
 use crate::resources::colony::{CasteRatios, ColonyStats};
 use crate::resources::nest::{NestGrid, NEST_CELL_SIZE, NEST_HEIGHT, NEST_WIDTH};
+use crate::resources::nest_pathfinding::NestPathCache;
+use crate::resources::nest_pheromone::{
+    LABEL_BROOD, LABEL_ENTRANCE, LABEL_FOOD_STORAGE, LABEL_MIDDEN, LABEL_QUEEN,
+};
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 
 pub struct NestPlugin;
@@ -27,13 +31,6 @@ pub enum GameView {
 struct SavedSurfaceCamera {
     position: Vec2,
     scale: f32,
-}
-
-#[derive(Component)]
-struct NestWorker {
-    target: Vec2,
-    speed: f32,
-    retarget_timer: f32,
 }
 
 #[derive(Component)]
@@ -60,7 +57,7 @@ impl Plugin for NestPlugin {
             .init_resource::<CasteRatios>()
             .init_resource::<SavedSurfaceCamera>()
             .init_state::<GameView>()
-            .add_systems(Startup, (render_nest, spawn_queen, spawn_nest_workers, spawn_food_indicators))
+            .add_systems(Startup, (render_nest, spawn_queen, spawn_test_ants, spawn_food_indicators))
             .add_systems(Update, toggle_view)
             .add_systems(OnEnter(GameView::Underground), enter_underground)
             .add_systems(OnExit(GameView::Underground), exit_underground)
@@ -75,7 +72,7 @@ impl Plugin for NestPlugin {
             )
             .add_systems(
                 Update,
-                nest_worker_movement.run_if(in_state(GameView::Underground)),
+                test_ant_retarget.run_if(in_state(GameView::Underground)),
             );
     }
 }
@@ -119,37 +116,90 @@ fn spawn_queen(mut commands: Commands) {
     ));
 }
 
-fn spawn_nest_workers(mut commands: Commands, grid: Res<NestGrid>) {
+/// Spawn 8 test ants with hardcoded destinations for pathfinding verification.
+fn spawn_test_ants(
+    mut commands: Commands,
+    grid: Res<NestGrid>,
+    mut path_cache: ResMut<NestPathCache>,
+) {
     let mut rng = rand::thread_rng();
-    let passable = collect_passable_cells(&grid);
-    if passable.is_empty() {
-        return;
-    }
 
-    for _ in 0..8 {
-        let &(gx, gy) = &passable[rng.gen_range(0..passable.len())];
-        let pos = nest_grid_to_world(gx, gy);
-        let jitter = Vec2::new(rng.gen_range(-4.0..4.0), rng.gen_range(-4.0..4.0));
+    // Define test ant assignments: (start_chamber, target_label, color)
+    // Each ant starts in one chamber and pathfinds to another.
+    let assignments = [
+        (LABEL_ENTRANCE, LABEL_BROOD, Color::srgb(0.2, 0.6, 0.2)),       // green: entrance -> brood
+        (LABEL_ENTRANCE, LABEL_QUEEN, Color::srgb(0.6, 0.2, 0.6)),       // purple: entrance -> queen
+        (LABEL_BROOD, LABEL_FOOD_STORAGE, Color::srgb(0.2, 0.5, 0.8)),   // blue: brood -> food
+        (LABEL_FOOD_STORAGE, LABEL_BROOD, Color::srgb(0.8, 0.5, 0.2)),   // orange: food -> brood
+        (LABEL_QUEEN, LABEL_ENTRANCE, Color::srgb(0.8, 0.8, 0.2)),       // yellow: queen -> entrance
+        (LABEL_QUEEN, LABEL_MIDDEN, Color::srgb(0.5, 0.5, 0.5)),         // gray: queen -> midden
+        (LABEL_MIDDEN, LABEL_QUEEN, Color::srgb(0.8, 0.3, 0.3)),         // red: midden -> queen
+        (LABEL_FOOD_STORAGE, LABEL_QUEEN, Color::srgb(0.3, 0.8, 0.8)),   // cyan: food -> queen
+    ];
 
-        let target_cell = passable[rng.gen_range(0..passable.len())];
-        let target = nest_grid_to_world(target_cell.0, target_cell.1);
+    for &(start_label, target_label, color) in &assignments {
+        // Find a passable cell in the start chamber
+        let start = find_chamber_cell(&grid, start_label);
+        let goal = find_chamber_cell(&grid, target_label);
 
-        commands.spawn((
+        let (start_pos, goal_pos) = match (start, goal) {
+            (Some(s), Some(g)) => (s, g),
+            _ => continue,
+        };
+
+        let path = path_cache.find_path(&grid, start_pos, goal_pos);
+        let world_pos = nest_grid_to_world(start_pos.0, start_pos.1);
+        let jitter_x = rng.gen_range(-3.0..3.0);
+        let jitter_y = rng.gen_range(-3.0..3.0);
+
+        let mut entity = commands.spawn((
             Sprite {
-                color: Color::srgb(0.15, 0.12, 0.08),
-                custom_size: Some(Vec2::splat(4.0)),
+                color,
+                custom_size: Some(Vec2::splat(5.0)),
                 ..default()
             },
-            Transform::from_xyz(pos.x + jitter.x, pos.y + jitter.y, 2.0),
+            Transform::from_xyz(world_pos.x + jitter_x, world_pos.y + jitter_y, 2.5),
             Visibility::Hidden,
             NestViewEntity,
-            NestWorker {
-                target,
-                speed: rng.gen_range(15.0..30.0),
-                retarget_timer: rng.gen_range(0.0..3.0),
+            NestTestAnt {
+                target_label,
+                retarget_timer: 0.0,
             },
         ));
+
+        if let Some(waypoints) = path {
+            entity.insert(NestPath::new(waypoints));
+        }
     }
+}
+
+/// Find a passable cell belonging to a chamber identified by label index.
+fn find_chamber_cell(grid: &NestGrid, label: usize) -> Option<(usize, usize)> {
+    use crate::resources::nest_pheromone::chamber_kind_to_label;
+
+    let cx = NEST_WIDTH / 2;
+
+    // For entrance, return the top of the entrance tunnel
+    if label == LABEL_ENTRANCE {
+        for y in 0..grid.height {
+            if grid.get(cx, y).is_passable() {
+                return Some((cx, y));
+            }
+        }
+        return None;
+    }
+
+    // For chambers, find a cell of the matching type
+    for y in 0..grid.height {
+        for x in 0..grid.width {
+            if let CellType::Chamber(kind) = grid.get(x, y) {
+                if chamber_kind_to_label(kind) == label {
+                    return Some((x, y));
+                }
+            }
+        }
+    }
+    None
 }
 
 fn spawn_food_indicators(mut commands: Commands) {
@@ -414,11 +464,13 @@ fn update_colony_stats(
     }
 }
 
-fn nest_worker_movement(
+/// When test ants complete their path, pick a new random destination and compute a new path.
+fn test_ant_retarget(
     clock: Res<SimClock>,
     time: Res<Time>,
     grid: Res<NestGrid>,
-    mut query: Query<(&mut Transform, &mut NestWorker)>,
+    mut path_cache: ResMut<NestPathCache>,
+    mut query: Query<(&Transform, &mut NestTestAnt, &mut NestPath)>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -426,29 +478,45 @@ fn nest_worker_movement(
 
     let dt = time.delta_secs() * clock.speed.multiplier();
     let mut rng = rand::thread_rng();
-    let passable = collect_passable_cells(&grid);
-    if passable.is_empty() {
-        return;
-    }
 
-    for (mut transform, mut worker) in &mut query {
-        worker.retarget_timer -= dt;
+    let labels = [LABEL_ENTRANCE, LABEL_BROOD, LABEL_FOOD_STORAGE, LABEL_QUEEN, LABEL_MIDDEN];
 
+    for (transform, mut test_ant, mut path) in &mut query {
+        if !path.is_complete() {
+            continue;
+        }
+
+        test_ant.retarget_timer -= dt;
+        if test_ant.retarget_timer > 0.0 {
+            continue;
+        }
+
+        // Pick a new random destination different from current target
+        let new_label = loop {
+            let candidate = labels[rng.gen_range(0..labels.len())];
+            if candidate != test_ant.target_label {
+                break candidate;
+            }
+        };
+        test_ant.target_label = new_label;
+        test_ant.retarget_timer = rng.gen_range(1.0..3.0);
+
+        // Find current grid position
         let pos = transform.translation.truncate();
-        let to_target = worker.target - pos;
-        let dist = to_target.length();
+        let current_grid = match crate::plugins::nest_navigation::world_to_nest_grid(pos) {
+            Some(g) => g,
+            None => continue,
+        };
 
-        if dist < 4.0 || worker.retarget_timer <= 0.0 {
-            let &(gx, gy) = &passable[rng.gen_range(0..passable.len())];
-            let new_target = nest_grid_to_world(gx, gy);
-            let jitter = Vec2::new(rng.gen_range(-4.0..4.0), rng.gen_range(-4.0..4.0));
-            worker.target = new_target + jitter;
-            worker.retarget_timer = rng.gen_range(2.0..6.0);
-        } else {
-            let dir = to_target.normalize();
-            let step = dir * worker.speed * dt;
-            transform.translation.x += step.x;
-            transform.translation.y += step.y;
+        // Find a cell in the target chamber
+        let goal = match find_chamber_cell(&grid, new_label) {
+            Some(g) => g,
+            None => continue,
+        };
+
+        // Compute path
+        if let Some(waypoints) = path_cache.find_path(&grid, current_grid, goal) {
+            *path = NestPath::new(waypoints);
         }
     }
 }

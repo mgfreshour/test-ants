@@ -4,5 +4,7 @@ pub mod ant_ai;
 pub mod camera;
 pub mod combat;
 pub mod nest;
+pub mod nest_navigation;
+pub mod nest_pheromone;
 pub mod pheromone;
 pub mod player;

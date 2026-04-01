@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 
+use crate::resources::nest_pathfinding::GridPos;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CellType {
     Soil,
@@ -79,4 +81,38 @@ impl Brood {
             BroodStage::Pupa => 30.0,
         }
     }
+}
+
+/// Stores a computed path through the nest tunnel network.
+/// Ants with this component follow waypoints toward a destination.
+#[derive(Component)]
+pub struct NestPath {
+    pub waypoints: Vec<GridPos>,
+    pub current_index: usize,
+}
+
+impl NestPath {
+    pub fn new(waypoints: Vec<GridPos>) -> Self {
+        Self {
+            waypoints,
+            current_index: 0,
+        }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.current_index >= self.waypoints.len()
+    }
+
+    pub fn destination(&self) -> Option<GridPos> {
+        self.waypoints.last().copied()
+    }
+}
+
+/// Marker for test ants that pathfind through the nest.
+#[derive(Component)]
+pub struct NestTestAnt {
+    /// Chamber label index this ant is navigating toward.
+    pub target_label: usize,
+    /// Timer for picking a new destination after reaching current one.
+    pub retarget_timer: f32,
 }

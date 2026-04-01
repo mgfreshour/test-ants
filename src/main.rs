@@ -10,6 +10,8 @@ use plugins::terrain::TerrainPlugin;
 use plugins::ant_ai::AntAiPlugin;
 use plugins::camera::CameraPlugin;
 use plugins::nest::NestPlugin;
+use plugins::nest_pheromone::NestPheromonePlugin;
+use plugins::nest_navigation::NestNavigationPlugin;
 use plugins::combat::CombatPlugin;
 use plugins::pheromone::PheromonePlugin;
 use plugins::player::PlayerPlugin;
@@ -33,6 +35,8 @@ fn main() {
             AntAiPlugin,
             CameraPlugin,
             NestPlugin,
+            NestPheromonePlugin,
+            NestNavigationPlugin,
             PheromonePlugin,
             PlayerPlugin,
             CombatPlugin,
