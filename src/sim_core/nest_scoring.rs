@@ -44,7 +44,6 @@ pub fn compute_scores(input: &NestScoringInput) -> NestTaskScores {
     let nursing_affinity = 1.0 - age_frac * 0.8;
     let hauling_affinity = 0.3 + age_frac * 0.7;
     let digging_affinity = if age_frac > 0.15 && age_frac < 0.6 { 1.2 } else { 0.4 };
-    let queen_affinity = 0.5;
 
     let feed_score = if input.unfed_larvae > 0 && input.has_food {
         let need = (input.unfed_larvae as f32 / 5.0).min(1.0);
@@ -110,5 +109,31 @@ pub fn choose_task(scores: &NestTaskScores) -> NestTaskChoice {
         NestTaskChoice::AttendQueen
     } else {
         NestTaskChoice::Idle
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{choose_task, compute_scores, NestTaskChoice};
+    use crate::sim_core::test_fixtures::NestScoringInputBuilder;
+
+    #[test]
+    fn feeding_wins_when_larvae_need_food() {
+        let input = NestScoringInputBuilder::new()
+            .larvae(5)
+            .food(4.0)
+            .build();
+        let scores = compute_scores(&input);
+        assert_eq!(choose_task(&scores), NestTaskChoice::FeedLarva);
+    }
+
+    #[test]
+    fn attending_queen_wins_when_hungry_and_fed() {
+        let input = NestScoringInputBuilder::new()
+            .food(4.0)
+            .queen(1.0, 1.0)
+            .build();
+        let scores = compute_scores(&input);
+        assert_eq!(choose_task(&scores), NestTaskChoice::AttendQueen);
     }
 }

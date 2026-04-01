@@ -7,6 +7,8 @@ pub mod ant_logic;
 pub mod nest_scoring;
 pub mod nest_transitions;
 pub mod rng;
+#[cfg(test)]
+pub mod test_fixtures;
 
 /// Scale frame delta seconds by a simulation speed multiplier.
 ///

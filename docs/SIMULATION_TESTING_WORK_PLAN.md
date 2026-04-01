@@ -40,7 +40,7 @@ Do not test:
        Why: allows exhaustive sub-step transition tests without world setup overhead.
 6. [x] **W6 (P0/M) - REFACTOR** Add deterministic RNG abstraction (`trait SimRng`) and seeded test implementation.  
        Why: removes flakiness from steering/selection tests.
-7. [ ] **W7 (P1/M)** Introduce test fixtures/builders for simulation state snapshots.  
+7. [x] **W7 (P1/M)** Introduce test fixtures/builders for simulation state snapshots.  
        Why: reduces test boilerplate and encourages broad test coverage.
 8. [ ] **W8 (P1/S)** Add unit tests for `SimSpeed`, clock tick, pause semantics, and dt scaling.  
        Why: protects foundational timing assumptions used by all systems.
