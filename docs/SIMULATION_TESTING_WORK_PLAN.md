@@ -30,7 +30,7 @@ Do not test:
 
 1. [x] **W1 (P0/S)** Define simulation-test charter and boundaries in-repo.  
        Why: prevents accidental UI test scope creep and aligns contributors.
-2. [ ] **W2 (P0/L) - REFACTOR** Create `sim_core` module for pure simulation functions (no `Commands`, `Sprite`, `Text2d`).  
+2. [x] **W2 (P0/L) - REFACTOR** Create `sim_core` module for pure simulation functions (no `Commands`, `Sprite`, `Text2d`).  
        Why: establishes testable seams for logic currently embedded in ECS systems.
 3. [ ] **W3 (P0/XL) - REFACTOR** Extract ant decision logic from `ant_ai` into pure functions.  
        Why: enables deterministic tests for foraging/returning/transition behaviors.

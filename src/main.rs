@@ -1,6 +1,7 @@
 mod components;
 mod plugins;
 mod resources;
+mod sim_core;
 mod ui;
 
 use bevy::prelude::*;
