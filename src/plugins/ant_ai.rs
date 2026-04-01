@@ -2,6 +2,8 @@ use bevy::prelude::*;
 use rand::Rng;
 
 use crate::components::ant::{Ant, ColonyMember, Health, Movement};
+use crate::components::pheromone::PheromoneType;
+use crate::resources::pheromone::PheromoneGrid;
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 use crate::resources::spatial_grid::SpatialGrid;
 
@@ -60,7 +62,8 @@ fn rebuild_spatial_grid(
 fn ant_random_walk(
     clock: Res<SimClock>,
     config: Res<SimConfig>,
-    mut query: Query<&mut Movement, With<Ant>>,
+    grid: Option<Res<PheromoneGrid>>,
+    mut query: Query<(&Transform, &mut Movement), With<Ant>>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -68,12 +71,33 @@ fn ant_random_walk(
 
     let mut rng = rand::thread_rng();
     let noise = config.exploration_noise;
+    let alpha = 2.0_f32;
 
-    for mut movement in &mut query {
+    for (transform, mut movement) in &mut query {
+        let mut pheromone_bias = Vec2::ZERO;
+
+        if let Some(ref grid) = grid {
+            let pos = transform.translation.truncate();
+            if let Some((gx, gy)) = grid.world_to_grid(pos) {
+                let gradient = grid.sense_gradient(gx, gy, PheromoneType::Home);
+                if gradient.length_squared() > 0.01 {
+                    pheromone_bias = gradient.normalize() * gradient.length().powf(alpha) * 0.02;
+                }
+            }
+        }
+
         let angle_offset = rng.gen_range(-noise..noise) * std::f32::consts::TAU;
         let current_angle = movement.direction.y.atan2(movement.direction.x);
         let new_angle = current_angle + angle_offset;
-        movement.direction = Vec2::new(new_angle.cos(), new_angle.sin());
+        let mut new_dir = Vec2::new(new_angle.cos(), new_angle.sin());
+
+        // Blend pheromone influence with random walk
+        new_dir = (new_dir + pheromone_bias).normalize_or_zero();
+        if new_dir == Vec2::ZERO {
+            new_dir = Vec2::new(new_angle.cos(), new_angle.sin());
+        }
+
+        movement.direction = new_dir;
     }
 }
 

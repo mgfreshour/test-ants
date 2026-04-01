@@ -9,6 +9,7 @@ use plugins::simulation::SimulationPlugin;
 use plugins::terrain::TerrainPlugin;
 use plugins::ant_ai::AntAiPlugin;
 use plugins::camera::CameraPlugin;
+use plugins::pheromone::PheromonePlugin;
 use ui::hud::HudPlugin;
 
 fn main() {
@@ -27,6 +28,7 @@ fn main() {
             TerrainPlugin,
             AntAiPlugin,
             CameraPlugin,
+            PheromonePlugin,
             HudPlugin,
         ))
         .run();

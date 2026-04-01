@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 
 use crate::components::ant::Ant;
+use crate::plugins::pheromone::{OverlayDisplay, OverlayState};
 use crate::resources::simulation::SimClock;
 
 pub struct HudPlugin;
@@ -37,6 +38,7 @@ fn setup_hud(mut commands: Commands) {
 
 fn update_hud(
     clock: Res<SimClock>,
+    overlay: Res<OverlayState>,
     diagnostics: Res<DiagnosticsStore>,
     ant_query: Query<&Ant>,
     mut text_query: Query<&mut Text, With<HudText>>,
@@ -52,11 +54,24 @@ fn update_hud(
         .and_then(|d| d.smoothed())
         .unwrap_or(0.0);
 
+    let overlay_label = if overlay.visible {
+        match overlay.display_type {
+            OverlayDisplay::All => "All",
+            OverlayDisplay::Home => "Home",
+            OverlayDisplay::Food => "Food",
+            OverlayDisplay::Alarm => "Alarm",
+            OverlayDisplay::Trail => "Trail",
+        }
+    } else {
+        "Off"
+    };
+
     **text = format!(
-        "Ants: {}  |  Speed: {}  |  FPS: {:.0}  |  Time: {:.1}s\n\
-         [Space] Pause/Play  [.] Cycle Speed  [WASD] Pan  [Scroll] Zoom",
+        "Ants: {}  |  Speed: {}  |  Overlay: {}  |  FPS: {:.0}  |  Time: {:.1}s\n\
+         [Space] Pause  [.] Speed  [H] Overlay  [WASD] Pan  [Scroll] Zoom",
         ant_count,
         clock.speed.label(),
+        overlay_label,
         fps,
         clock.elapsed,
     );
