@@ -56,7 +56,7 @@ Do not test:
         Why: protects high-complexity behavior chains with many edge cases.
 14. [x] **W14 (P2/M)** Add property-style tests for invariants (no invalid states, bounded values, no negative food).  
         Why: catches broad classes of logic bugs early.
-15. [ ] **W15 (P2/M)** Add integration tests with `bevy::app::App` for minimal end-to-end sim ticks (headless).  
+15. [x] **W15 (P2/M)** Add integration tests with `bevy::app::App` for minimal end-to-end sim ticks (headless).  
         Why: validates ECS wiring while keeping display assertions out of scope.
 16. [ ] **W16 (P2/M)** Add regression tests for known bug-prone flows (orphaned returners, portal transitions, dig face selection).  
         Why: protects specific historical failure modes.

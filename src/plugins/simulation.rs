@@ -40,3 +40,39 @@ fn toggle_sim_speed(input: Res<ButtonInput<KeyCode>>, mut clock: ResMut<SimClock
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use bevy::prelude::*;
+
+    use super::SimulationPlugin;
+    use crate::resources::simulation::{SimClock, SimSpeed};
+
+    #[test]
+    fn sim_plugin_advances_tick_when_running() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, SimulationPlugin));
+
+        let before = app.world().resource::<SimClock>().tick;
+        app.update();
+        let after = app.world().resource::<SimClock>().tick;
+
+        assert_eq!(after, before + 1);
+    }
+
+    #[test]
+    fn sim_plugin_does_not_advance_tick_when_paused() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, SimulationPlugin));
+
+        {
+            let mut clock = app.world_mut().resource_mut::<SimClock>();
+            clock.speed = SimSpeed::Paused;
+        }
+        let before = app.world().resource::<SimClock>().tick;
+        app.update();
+        let after = app.world().resource::<SimClock>().tick;
+
+        assert_eq!(after, before);
+    }
+}
