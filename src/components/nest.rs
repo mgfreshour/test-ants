@@ -46,7 +46,7 @@ impl CellType {
             CellType::SoftSoil => Color::srgb(0.50, 0.36, 0.20),
             CellType::Clay => Color::srgb(0.55, 0.40, 0.25),
             CellType::Rock => Color::srgb(0.4, 0.4, 0.4),
-            CellType::Tunnel => Color::srgb(0.15, 0.10, 0.05),
+            CellType::Tunnel => Color::srgb(0.35, 0.35, 0.35),
             CellType::Chamber(kind) => match kind {
                 ChamberKind::Queen => Color::srgb(0.25, 0.12, 0.18),
                 ChamberKind::Brood => Color::srgb(0.22, 0.15, 0.10),
@@ -65,6 +65,25 @@ pub struct NestTile {
 
 #[derive(Component)]
 pub struct Queen;
+
+/// Tracks how recently the queen has been fed.
+/// Satiation decays over time; egg laying requires satiation > 0.
+#[derive(Component)]
+pub struct QueenHunger {
+    /// Current satiation level (0.0 = starving, max ~1.0 after a feeding).
+    pub satiation: f32,
+    /// Rate at which satiation decays per second.
+    pub decay_rate: f32,
+}
+
+impl Default for QueenHunger {
+    fn default() -> Self {
+        Self {
+            satiation: 0.5, // start partially fed so first egg can happen quickly
+            decay_rate: 0.04, // ~25 seconds to go from 1.0 to 0.0
+        }
+    }
+}
 
 /// Marks a brood entity as being physically carried by an ant.
 #[derive(Component)]
@@ -103,6 +122,23 @@ impl Brood {
             BroodStage::Pupa => 30.0,
         }
     }
+}
+
+#[derive(Component)]
+pub struct FoodEntity {
+    pub amount: f32,
+}
+
+impl FoodEntity {
+    pub fn new(amount: f32) -> Self {
+        Self { amount }
+    }
+}
+
+#[derive(Component)]
+pub struct StackedItem {
+    pub grid_pos: (usize, usize),
+    pub stack_index: u8,
 }
 
 /// Stores a computed path through the nest tunnel network.
@@ -169,9 +205,10 @@ pub enum HaulStep {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttendStep {
+    GoToStorage,
+    PickUpFood,
     GoToQueen,
-    Walking,
-    Grooming,
+    FeedQueen,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

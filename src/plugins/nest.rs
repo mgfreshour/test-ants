@@ -3,7 +3,7 @@ use rand::Rng;
 
 use crate::components::ant::{Ant, Caste, ColonyMember, Health, Movement, PositionHistory, TrailSense};
 use crate::components::map::{MapId, MapKind, MapMarker, spawn_portal_pair};
-use crate::components::nest::{Brood, BroodStage, CellType, ChamberKind, NestTile, Queen};
+use crate::components::nest::{Brood, BroodStage, CellType, ChamberKind, NestTile, Queen, QueenHunger};
 use crate::plugins::ant_ai::ColonyFood;
 use crate::plugins::camera::MainCamera;
 use crate::resources::active_map::{ActiveMap, MapRegistry, SavedCamera, SavedCameraStates};
@@ -26,7 +26,7 @@ const QUEEN_FOOD_COST: f32 = 2.0;
 /// Default nest-view camera scale.
 const NEST_CAMERA_SCALE: f32 = 0.7;
 
-fn nest_grid_to_world(gx: usize, gy: usize) -> Vec2 {
+pub fn nest_grid_to_world(gx: usize, gy: usize) -> Vec2 {
     let offset_x = -(NEST_WIDTH as f32 * NEST_CELL_SIZE) / 2.0;
     let offset_y = (NEST_HEIGHT as f32 * NEST_CELL_SIZE) / 2.0;
     Vec2::new(
@@ -50,6 +50,7 @@ impl Plugin for NestPlugin {
                 (
                     cycle_map_view,
                     sync_map_visibility,
+                    queen_hunger_decay,
                     queen_egg_laying,
                     brood_development,
                     update_colony_stats,
@@ -69,7 +70,7 @@ fn setup_maps(mut commands: Commands, config: Res<SimConfig>) {
     let surface = commands.spawn((MapMarker, MapKind::Surface)).id();
 
     // Player nest map — carries all per-nest data.
-    let mut nest_grid = NestGrid::default();
+    let nest_grid = NestGrid::default();
     let mut phero_grid = NestPheromoneGrid::default();
     phero_grid.seed_from_grid(&nest_grid);
 
@@ -82,6 +83,7 @@ fn setup_maps(mut commands: Commands, config: Res<SimConfig>) {
         ColonyFood::default(),
         BehaviorSliders::default(),
         PlayerDigZones::default(),
+        crate::resources::nest::TileStackRegistry::default(),
     )).id();
 
     // Portal pair: surface nest entrance ↔ underground entrance cell.
@@ -136,19 +138,17 @@ fn render_nest(
     }
 }
 
-fn spawn_queen(mut commands: Commands, registry: Res<MapRegistry>) {
+fn spawn_queen(mut commands: Commands, registry: Res<MapRegistry>, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<ColorMaterial>>) {
     let cx = NEST_WIDTH / 2;
     let queen_center = nest_grid_to_world(cx, 16);
 
     commands.spawn((
-        Sprite {
-            color: Color::srgb(0.8, 0.6, 0.1),
-            custom_size: Some(Vec2::splat(12.0)),
-            ..default()
-        },
+        Mesh2d(meshes.add(Circle::new(6.0))),
+        MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.8, 0.6, 0.1)))),
         Transform::from_xyz(queen_center.x, queen_center.y, 3.0),
         Visibility::Hidden,
         Queen,
+        QueenHunger::default(),
         MapId(registry.player_nest),
         Health { current: 100.0, max: 100.0 },
     ));
@@ -253,6 +253,20 @@ fn sync_map_visibility(
 
 // ── Nest simulation ──────────────────────────────────────────────────
 
+fn queen_hunger_decay(
+    clock: Res<SimClock>,
+    time: Res<Time>,
+    mut queen_query: Query<&mut QueenHunger, With<Queen>>,
+) {
+    if clock.speed == SimSpeed::Paused {
+        return;
+    }
+    let dt = time.delta_secs() * clock.speed.multiplier();
+    for mut hunger in &mut queen_query {
+        hunger.satiation = (hunger.satiation - hunger.decay_rate * dt).max(0.0);
+    }
+}
+
 fn queen_egg_laying(
     clock: Res<SimClock>,
     time: Res<Time>,
@@ -260,10 +274,13 @@ fn queen_egg_laying(
     mut commands: Commands,
     mut food_query: Query<&mut ColonyFood, With<MapMarker>>,
     map_grid_query: Query<&NestGrid, With<MapMarker>>,
-    queen_query: Query<(), With<Queen>>,
+    mut stack_query: Query<&mut crate::resources::nest::TileStackRegistry, With<MapMarker>>,
+    food_entity_query: Query<(Entity, &Transform, &crate::components::nest::FoodEntity, &crate::components::nest::StackedItem)>,
+    queen_query: Query<&QueenHunger, With<Queen>>,
     mut egg_timer: Local<f32>,
 ) {
-    if clock.speed == SimSpeed::Paused || queen_query.is_empty() {
+    let Ok(hunger) = queen_query.get_single() else { return };
+    if clock.speed == SimSpeed::Paused {
         return;
     }
 
@@ -273,8 +290,45 @@ fn queen_egg_laying(
     let dt = time.delta_secs() * clock.speed.multiplier();
     *egg_timer += dt;
 
-    if *egg_timer >= QUEEN_EGG_INTERVAL && colony_food.stored >= QUEEN_FOOD_COST {
+    // Queen must be fed (satiation > 0) and colony must have enough stored food.
+    if *egg_timer >= QUEEN_EGG_INTERVAL && colony_food.stored >= QUEEN_FOOD_COST && hunger.satiation > 0.0 {
+        // Consume 2 nearest food entities from storage
+        let Ok(mut stack_registry) = stack_query.get_mut(registry.player_nest) else { return };
+
+        let mut to_despawn = Vec::new();
+        let mut consumed = 0.0;
+
+        let mut storage_food: Vec<_> = food_entity_query
+            .iter()
+            .filter(|(_, _, _, stacked)| {
+                grid.get(stacked.grid_pos.0, stacked.grid_pos.1) == CellType::Chamber(ChamberKind::FoodStorage)
+            })
+            .collect();
+
+        // Sort by distance (consume nearest first)
+        storage_food.sort_by_key(|(_, tf, _, _)| {
+            (tf.translation.truncate().distance(Vec2::ZERO) * 100.0) as i32
+        });
+
+        for (e, _, food, stacked) in storage_food {
+            if consumed >= QUEEN_FOOD_COST { break; }
+            consumed += food.amount;
+            stack_registry.remove(stacked.grid_pos, e);
+            to_despawn.push(e);
+        }
+
+        if consumed < QUEEN_FOOD_COST {
+            // Not enough food entities, abort laying (don't decrement timer)
+            return;
+        }
+
+        // Successfully found enough food, commit to laying egg
         *egg_timer -= QUEEN_EGG_INTERVAL;
+
+        for e in to_despawn {
+            commands.entity(e).despawn();
+        }
+
         colony_food.stored -= QUEEN_FOOD_COST;
 
         let mut rng = rand::thread_rng();
@@ -311,7 +365,8 @@ fn brood_development(
     caste_ratios: Res<CasteRatios>,
     registry: Res<MapRegistry>,
     mut commands: Commands,
-    mut brood_query: Query<(Entity, &mut Brood, &mut Sprite)>,
+    mut stack_query: Query<&mut crate::resources::nest::TileStackRegistry, With<MapMarker>>,
+    mut brood_query: Query<(Entity, &mut Brood, &mut Sprite, Option<&crate::components::nest::StackedItem>)>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -320,7 +375,7 @@ fn brood_development(
     let dt = time.delta_secs() * clock.speed.multiplier();
     let mut rng = rand::thread_rng();
 
-    for (entity, mut brood, mut sprite) in &mut brood_query {
+    for (entity, mut brood, mut sprite, stacked_opt) in &mut brood_query {
         brood.timer += dt;
 
         if brood.timer >= brood.stage_duration() {
@@ -337,6 +392,12 @@ fn brood_development(
                     sprite.custom_size = Some(Vec2::splat(5.0));
                 }
                 BroodStage::Pupa => {
+                    // Remove from stack registry
+                    if let Ok(mut stack_reg) = stack_query.get_mut(registry.player_nest) {
+                        if let Some(stacked) = stacked_opt {
+                            stack_reg.remove(stacked.grid_pos, entity);
+                        }
+                    }
                     commands.entity(entity).despawn();
 
                     let nest = config.nest_position;

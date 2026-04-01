@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::components::map::{MapId, MapKind, MapMarker};
-use crate::components::nest::NestPath;
+use crate::components::nest::{NestPath, NestTask};
 use crate::resources::active_map::viewing_nest;
 use crate::resources::nest::{NestGrid, NEST_CELL_SIZE, NEST_HEIGHT, NEST_WIDTH};
 use crate::resources::nest_pathfinding::{GridPos, NestPathCache};
@@ -20,11 +20,7 @@ impl Plugin for NestNavigationPlugin {
         app.init_resource::<NestDebugPaths>()
             .add_systems(
                 Update,
-                (
-                    nest_path_following,
-                    nest_grid_collision,
-                )
-                    .chain(),
+                nest_path_following,
             )
             .add_systems(
                 Update,
@@ -102,9 +98,9 @@ fn nest_path_following(
 /// Clamp ant positions to passable cells.
 /// Any ant on a nest map that ends up in a wall is relocated to the nearest
 /// passable cell. Ants outside the grid entirely are sent to the entrance.
-fn nest_grid_collision(
+pub fn nest_grid_collision(
     map_query: Query<&NestGrid, With<MapMarker>>,
-    mut ant_query: Query<(Entity, &mut Transform, &MapId)>,
+    mut ant_query: Query<(Entity, &mut Transform, &MapId), With<NestTask>>,
 ) {
     for (entity, mut transform, map_id) in &mut ant_query {
         let Ok(grid) = map_query.get(map_id.0) else { continue };

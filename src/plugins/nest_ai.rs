@@ -4,19 +4,19 @@ use rand::Rng;
 use crate::components::ant::{Ant, AntState, ColonyMember, Health, PlayerControlled};
 use crate::components::map::{MapId, MapKind, MapMarker, MapPortal, PORTAL_RANGE};
 use crate::components::nest::{
-    AttendStep, Brood, BroodStage, CarriedBy, CellType, ChamberKind, DigStep, FeedStep, HaulStep,
-    MoveBroodStep, NestPath, NestTask, Queen,
+    AttendStep, Brood, BroodStage, CarriedBy, CellType, ChamberKind, DigStep, FeedStep, FoodEntity,
+    HaulStep, MoveBroodStep, NestPath, NestTask, Queen, QueenHunger, StackedItem,
 };
 use crate::plugins::ant_ai::ColonyFood;
-use crate::plugins::nest_navigation::{nest_grid_to_world, world_to_nest_grid};
-use crate::resources::active_map::{ActiveMap, MapRegistry, viewing_nest};
+use crate::plugins::nest_navigation::{nest_grid_to_world, world_to_nest_grid, nest_grid_collision};
+use crate::resources::active_map::{ActiveMap, MapRegistry};
 use crate::resources::colony::BehaviorSliders;
-use crate::resources::nest::{NestGrid, PlayerDigZones, NEST_WIDTH};
+use crate::resources::nest::{NestGrid, PlayerDigZones, TileStackRegistry, stack_position_offset, NEST_WIDTH};
 use crate::resources::nest_pathfinding::NestPathCache;
 use crate::resources::nest_pheromone::{
     NestPheromoneGrid, LABEL_BROOD, LABEL_ENTRANCE, LABEL_FOOD_STORAGE, LABEL_MIDDEN, LABEL_QUEEN,
 };
-use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
+use crate::resources::simulation::{SimClock, SimSpeed};
 
 pub struct NestAiPlugin;
 
@@ -28,7 +28,8 @@ impl Plugin for NestAiPlugin {
                 (
                     apply_brood_fed,
                     apply_brood_relocated,
-                    update_carried_brood_positions,
+                    cleanup_orphaned_carried_items,
+                    update_carried_item_positions,
                     apply_excavated_cells,
                     portal_transition,
                     nest_to_surface_transition,
@@ -36,6 +37,7 @@ impl Plugin for NestAiPlugin {
                     nest_task_advance,
                     construction_pheromone_deposit,
                     nest_separation_steering,
+                    nest_grid_collision,
                     player_dig_zone_input,
                     nest_task_labels,
                 )
@@ -58,36 +60,30 @@ fn apply_brood_fed(
 /// Apply the BroodRelocated marker: set relocated = true and move brood to brood chamber.
 fn apply_brood_relocated(
     mut commands: Commands,
-    map_query: Query<&NestGrid, With<MapMarker>>,
+    mut map_query: Query<(&NestGrid, &mut TileStackRegistry), With<MapMarker>>,
     registry: Res<MapRegistry>,
     mut query: Query<(Entity, &mut Brood, &mut Transform), With<BroodRelocated>>,
 ) {
-    let Ok(grid) = map_query.get(registry.player_nest) else { return };
-
-    // Collect all brood chamber cells
-    let brood_cells: Vec<(usize, usize)> = (0..grid.height)
-        .flat_map(|y| (0..grid.width).map(move |x| (x, y)))
-        .filter(|&(x, y)| grid.get(x, y) == CellType::Chamber(ChamberKind::Brood))
-        .collect();
-
-    if brood_cells.is_empty() {
-        return;
-    }
-
-    let mut rng = rand::thread_rng();
-    let cell_size = crate::resources::nest::NEST_CELL_SIZE;
+    let Ok((grid, mut stack_registry)) = map_query.get_mut(registry.player_nest) else { return };
 
     for (entity, mut brood, mut transform) in &mut query {
         brood.relocated = true;
-        // Pick a random cell within the brood chamber
-        let &(gx, gy) = &brood_cells[rng.gen_range(0..brood_cells.len())];
-        let dest = nest_grid_to_world(gx, gy);
-        let jitter = Vec2::new(
-            rng.gen_range(-cell_size * 0.35..cell_size * 0.35),
-            rng.gen_range(-cell_size * 0.35..cell_size * 0.35),
-        );
-        transform.translation.x = dest.x + jitter.x;
-        transform.translation.y = dest.y + jitter.y;
+
+        if let Some(tile_pos) = stack_registry.find_available_tile(&grid, ChamberKind::Brood) {
+            if let Some(stack_idx) = stack_registry.push(tile_pos, entity) {
+                let base_pos = nest_grid_to_world(tile_pos.0, tile_pos.1);
+                let offset = stack_position_offset(stack_idx);
+
+                transform.translation.x = base_pos.x + offset.x;
+                transform.translation.y = base_pos.y + offset.y;
+
+                commands.entity(entity).insert(StackedItem {
+                    grid_pos: tile_pos,
+                    stack_index: stack_idx,
+                });
+            }
+        }
+
         commands.entity(entity).remove::<BroodRelocated>();
     }
 }
@@ -171,8 +167,7 @@ fn portal_transition(
         (Entity, &mut Transform, &mut Ant, &ColonyMember, &mut MapId, &mut Visibility),
         Without<PlayerControlled>,
     >,
-    nest_ants: Query<&MapId, With<NestTask>>,
-    surface_ants: Query<&MapId, Without<NestTask>>,
+    nest_task_query: Query<(), With<NestTask>>,
     mut commands: Commands,
 ) {
     if clock.speed == SimSpeed::Paused {
@@ -180,13 +175,13 @@ fn portal_transition(
     }
 
     // Compute desired underground count from player nest's sliders.
+    let total_ants = ant_query.iter().len();
+    let current_underground = nest_task_query.iter().count();
     let desired_underground = if let Ok(sliders) = sliders_query.get(registry.player_nest) {
-        let total = nest_ants.iter().count() + surface_ants.iter().count();
-        ((sliders.nurse + sliders.dig) * total as f32).ceil() as usize
+        ((sliders.nurse + sliders.dig) * total_ants as f32).ceil() as usize
     } else {
         0
     };
-    let current_underground = nest_ants.iter().count();
 
     let mut rng = rand::thread_rng();
 
@@ -302,39 +297,35 @@ fn nest_utility_scoring(
     clock: Res<SimClock>,
     map_query: Query<(&NestGrid, &NestPheromoneGrid, &ColonyFood, &BehaviorSliders, Option<&PlayerDigZones>), With<MapMarker>>,
     brood_query: Query<(&Brood, &MapId)>,
-    queen_query: Query<(&MapId, ()), With<Queen>>,
-    task_count_query: Query<(&MapId, &NestTask)>,
+    queen_query: Query<(&MapId, &QueenHunger), With<Queen>>,
     mut query: Query<(Entity, &Transform, &Ant, &MapId, &mut NestTask)>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
     }
 
-    // Pre-compute digger/mover counts per map to avoid mutable borrow conflict.
+    // Pre-compute digger/mover counts per map from the query itself before mutating.
     let mut digger_counts: std::collections::HashMap<Entity, usize> = std::collections::HashMap::new();
     let mut mover_counts: std::collections::HashMap<Entity, usize> = std::collections::HashMap::new();
-    for (m, t) in &task_count_query {
-        if matches!(t, NestTask::Dig { .. }) {
+    for (_, _, _, m, t) in query.iter() {
+        if matches!(&*t, NestTask::Dig { .. }) {
             *digger_counts.entry(m.0).or_insert(0) += 1;
         }
-        if matches!(t, NestTask::MoveBrood { .. }) {
+        if matches!(&*t, NestTask::MoveBrood { .. }) {
             *mover_counts.entry(m.0).or_insert(0) += 1;
         }
     }
 
     for (_entity, transform, ant, map_id, mut task) in &mut query {
         // Only process ants on a nest map.
-        let Ok((nest_grid, phero_grid, colony_food, sliders, dig_zones_opt)) =
+        let Ok((nest_grid, phero_grid, colony_food, _sliders, dig_zones_opt)) =
             map_query.get(map_id.0) else { continue };
 
-        // Only re-evaluate when current task is complete or idle.
+        // Only re-evaluate when idle for long enough.
+        // All tasks self-terminate to Idle when complete.
         let should_reevaluate = match &*task {
             NestTask::Idle { timer } => *timer > REEVALUATE_INTERVAL,
-            NestTask::FeedLarva { .. } => false, // self-terminates via advance
-            NestTask::MoveBrood { .. } => false, // self-terminates via advance
-            NestTask::HaulFood { step } => *step == HaulStep::DropFood,
-            NestTask::AttendQueen { step } => *step == AttendStep::Grooming,
-            NestTask::Dig { step, .. } => *step == DigStep::DropSoil,
+            _ => false,
         };
 
         if !should_reevaluate {
@@ -344,7 +335,14 @@ fn nest_utility_scoring(
         let pos = transform.translation.truncate();
         let grid_pos = world_to_nest_grid(pos);
 
-        let has_queen = queen_query.iter().any(|(qmap, _)| qmap.0 == map_id.0);
+        // queen_hunger_val: 0 = fully fed, 1 = starving.
+        let queen_data = queen_query
+            .iter()
+            .find(|(qmap, _)| qmap.0 == map_id.0);
+        let has_queen = queen_data.is_some();
+        let queen_hunger_val = queen_data
+            .map(|(_, h)| 1.0 - h.satiation.clamp(0.0, 1.0))
+            .unwrap_or(0.0);
         let unfed_larvae = brood_query
             .iter()
             .filter(|(b, m)| m.0 == map_id.0 && b.stage == BroodStage::Larva && !b.fed)
@@ -375,8 +373,6 @@ fn nest_utility_scoring(
         let nursing_affinity = 1.0 - age_frac * 0.8;
         let hauling_affinity = 0.3 + age_frac * 0.7;
         let digging_affinity = if age_frac > 0.15 && age_frac < 0.6 { 1.2 } else { 0.4 };
-        let queen_affinity = 0.5;
-
         let has_food = colony_food.stored > 0.5;
 
         // Score FEED_LARVA
@@ -397,16 +393,17 @@ fn nest_utility_scoring(
             0.0
         };
 
-        // Score HAUL_FOOD
-        let haul_score = if colony_food.stored > 2.0 {
-            0.4 * hauling_affinity
+        // Score HAUL_FOOD — haul when there's food deposited worth moving.
+        let haul_score = if colony_food.stored > 1.0 {
+            0.5 * hauling_affinity
         } else {
             0.0
         };
 
-        // Score ATTEND_QUEEN
-        let queen_score = if has_queen {
-            0.3 * queen_affinity * (0.2 + queen_signal * 0.8)
+        // Score ATTEND_QUEEN — driven by queen hunger; urgent when starving.
+        let queen_score = if has_queen && has_food {
+            let hunger_urgency = 0.3 + queen_hunger_val * 0.7; // 0.3 when full, 1.0 when starving
+            0.8 * nursing_affinity * hunger_urgency * (0.3 + queen_signal * 0.7)
         } else {
             0.0
         };
@@ -469,7 +466,7 @@ fn nest_utility_scoring(
             }
         } else if max_score == queen_score && queen_score > 0.0 {
             NestTask::AttendQueen {
-                step: AttendStep::GoToQueen,
+                step: AttendStep::GoToStorage,
             }
         } else {
             NestTask::Idle { timer: 0.0 }
@@ -484,9 +481,12 @@ fn nest_utility_scoring(
 fn nest_task_advance(
     clock: Res<SimClock>,
     time: Res<Time>,
-    mut map_query: Query<(&NestGrid, &NestPheromoneGrid, &mut NestPathCache, &mut ColonyFood, Option<&PlayerDigZones>), With<MapMarker>>,
+    mut map_query: Query<(&NestGrid, &NestPheromoneGrid, &mut NestPathCache, &mut ColonyFood, &mut TileStackRegistry, Option<&PlayerDigZones>), With<MapMarker>>,
     mut commands: Commands,
     brood_query: Query<(Entity, &Transform, &Brood)>,
+    food_entity_query: Query<(Entity, &Transform, &FoodEntity, Option<&StackedItem>)>,
+    carried_food_query: Query<(Entity, &CarriedBy), With<FoodEntity>>,
+    mut queen_hunger_query: Query<&mut QueenHunger, With<Queen>>,
     mut ant_query: Query<(Entity, &Transform, &MapId, &mut NestTask, Option<&NestPath>)>,
 ) {
     if clock.speed == SimSpeed::Paused {
@@ -495,9 +495,17 @@ fn nest_task_advance(
 
     let dt = time.delta_secs() * clock.speed.multiplier();
 
+    // Pre-pass: count how many ants are already targeting each dig cell.
+    let mut dig_target_counts: std::collections::HashMap<(usize, usize), usize> = std::collections::HashMap::new();
+    for (_, _, _, task, _) in &ant_query {
+        if let NestTask::Dig { target_cell: Some(cell), .. } = &*task {
+            *dig_target_counts.entry(*cell).or_insert(0) += 1;
+        }
+    }
+
     for (entity, transform, map_id, mut task, path) in &mut ant_query {
         // Only process ants on a nest map (one with NestGrid).
-        let Ok((grid, phero_grid, mut path_cache, mut colony_food, dig_zones_opt)) =
+        let Ok((grid, phero_grid, mut path_cache, mut colony_food, mut stack_registry, dig_zones_opt)) =
             map_query.get_mut(map_id.0) else { continue };
 
         let pos = transform.translation.truncate();
@@ -506,27 +514,60 @@ fn nest_task_advance(
             None => continue,
         };
 
-        let path_complete = path.map_or(true, |p| p.is_complete());
+        // path_done = true only when an actual path was followed to completion.
+        // has_no_path = true when the ant has no NestPath component at all.
+        let path_done = path.map_or(false, |p| p.is_complete());
+        let has_no_path = path.is_none();
+
+        // "at_destination" = ant has arrived (path completed) or has no path (already cleaned up).
+        // Used by action steps that need the ant to be at a location.
+        let at_destination = path_done || has_no_path;
 
         match &mut *task {
             NestTask::FeedLarva { step, target_larva } => {
                 match step {
                     FeedStep::GoToStorage => {
-                        if path_complete {
-                            // Request path to food storage.
-                            if let Some(goal) = find_label_cell(&grid, LABEL_FOOD_STORAGE) {
-                                if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
-                                    commands.entity(entity).insert(NestPath::new(waypoints));
+                        if at_destination {
+                            if path.is_some() {
+                                // Path existed and completed — advance.
+                                *step = FeedStep::PickUpFood;
+                            } else {
+                                // No path yet — request one.
+                                if let Some(goal) = find_label_cell(&grid, LABEL_FOOD_STORAGE) {
+                                    if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
+                                        commands.entity(entity).insert(NestPath::new(waypoints));
+                                    } else {
+                                        *task = NestTask::Idle { timer: 0.0 };
+                                        continue;
+                                    }
+                                } else {
+                                    *task = NestTask::Idle { timer: 0.0 };
+                                    continue;
                                 }
                             }
-                            *step = FeedStep::PickUpFood;
                         }
                     }
                     FeedStep::PickUpFood => {
-                        if path_complete {
-                            // "Pick up" food from colony storage.
-                            if colony_food.stored >= 1.0 {
-                                colony_food.stored -= 1.0;
+                        if at_destination {
+                            // Find nearest stacked food in storage
+                            let storage_food = food_entity_query
+                                .iter()
+                                .filter(|(_, _, _, stacked_opt)| {
+                                    stacked_opt.map_or(false, |s| {
+                                        grid.get(s.grid_pos.0, s.grid_pos.1) == CellType::Chamber(ChamberKind::FoodStorage)
+                                    })
+                                })
+                                .min_by_key(|(_, food_tf, _, _)| {
+                                    (pos.distance(food_tf.translation.truncate()) * 100.0) as i32
+                                });
+
+                            if let Some((food_e, _, _, stacked_opt)) = storage_food {
+                                if let Some(stacked) = stacked_opt {
+                                    stack_registry.remove(stacked.grid_pos, food_e);
+                                }
+                                commands.entity(food_e).remove::<StackedItem>();
+                                commands.entity(food_e).insert(CarriedBy(entity));
+                                commands.entity(entity).remove::<NestPath>();
                                 *step = FeedStep::GoToBrood;
                             } else {
                                 // No food available, go idle.
@@ -536,18 +577,26 @@ fn nest_task_advance(
                         }
                     }
                     FeedStep::GoToBrood => {
-                        if path_complete {
-                            // Request path to brood chamber.
-                            if let Some(goal) = find_label_cell(&grid, LABEL_BROOD) {
-                                if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
-                                    commands.entity(entity).insert(NestPath::new(waypoints));
+                        if at_destination {
+                            if path.is_some() {
+                                *step = FeedStep::FindLarva;
+                            } else {
+                                if let Some(goal) = find_label_cell(&grid, LABEL_BROOD) {
+                                    if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
+                                        commands.entity(entity).insert(NestPath::new(waypoints));
+                                    } else {
+                                        *task = NestTask::Idle { timer: 0.0 };
+                                        continue;
+                                    }
+                                } else {
+                                    *task = NestTask::Idle { timer: 0.0 };
+                                    continue;
                                 }
                             }
-                            *step = FeedStep::FindLarva;
                         }
                     }
                     FeedStep::FindLarva => {
-                        if path_complete {
+                        if at_destination {
                             // Find nearest unfed larva.
                             let mut best: Option<(Entity, f32)> = None;
                             for (brood_entity, brood_tf, brood) in &brood_query {
@@ -573,6 +622,16 @@ fn nest_task_advance(
                         if let Some(larva_entity) = target_larva {
                             commands.entity(*larva_entity).try_insert(BroodFed);
                         }
+
+                        // Despawn carried food entity
+                        for (food_e, carried_by) in &carried_food_query {
+                            if carried_by.0 == entity {
+                                commands.entity(food_e).despawn();
+                                colony_food.stored -= 1.0;
+                                break;
+                            }
+                        }
+
                         *task = NestTask::Idle { timer: 0.0 };
                         continue;
                     }
@@ -582,17 +641,26 @@ fn nest_task_advance(
             NestTask::MoveBrood { step, target_brood } => {
                 match step {
                     MoveBroodStep::GoToQueen => {
-                        if path_complete {
-                            if let Some(goal) = find_label_cell(&grid, LABEL_QUEEN) {
-                                if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
-                                    commands.entity(entity).insert(NestPath::new(waypoints));
+                        if at_destination {
+                            if path.is_some() {
+                                *step = MoveBroodStep::PickUpBrood;
+                            } else {
+                                if let Some(goal) = find_label_cell(&grid, LABEL_QUEEN) {
+                                    if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
+                                        commands.entity(entity).insert(NestPath::new(waypoints));
+                                    } else {
+                                        *task = NestTask::Idle { timer: 0.0 };
+                                        continue;
+                                    }
+                                } else {
+                                    *task = NestTask::Idle { timer: 0.0 };
+                                    continue;
                                 }
                             }
-                            *step = MoveBroodStep::PickUpBrood;
                         }
                     }
                     MoveBroodStep::PickUpBrood => {
-                        if path_complete {
+                        if at_destination {
                             // Find nearest unrelocated brood.
                             let mut best: Option<(Entity, f32)> = None;
                             for (brood_entity, brood_tf, brood) in &brood_query {
@@ -608,6 +676,7 @@ fn nest_task_advance(
                                 *target_brood = Some(brood_entity);
                                 // Attach brood to ant so it follows.
                                 commands.entity(brood_entity).insert(CarriedBy(entity));
+                                commands.entity(entity).remove::<NestPath>();
                                 *step = MoveBroodStep::GoToBrood;
                             } else {
                                 *task = NestTask::Idle { timer: 0.0 };
@@ -616,17 +685,26 @@ fn nest_task_advance(
                         }
                     }
                     MoveBroodStep::GoToBrood => {
-                        if path_complete {
-                            if let Some(goal) = find_label_cell(&grid, LABEL_BROOD) {
-                                if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
-                                    commands.entity(entity).insert(NestPath::new(waypoints));
+                        if at_destination {
+                            if path.is_some() {
+                                *step = MoveBroodStep::PlaceBrood;
+                            } else {
+                                if let Some(goal) = find_label_cell(&grid, LABEL_BROOD) {
+                                    if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
+                                        commands.entity(entity).insert(NestPath::new(waypoints));
+                                    } else {
+                                        *task = NestTask::Idle { timer: 0.0 };
+                                        continue;
+                                    }
+                                } else {
+                                    *task = NestTask::Idle { timer: 0.0 };
+                                    continue;
                                 }
                             }
-                            *step = MoveBroodStep::PlaceBrood;
                         }
                     }
                     MoveBroodStep::PlaceBrood => {
-                        if path_complete {
+                        if at_destination {
                             if let Some(brood_entity) = target_brood {
                                 // Release brood from ant, then mark for relocation.
                                 commands.entity(*brood_entity).remove::<CarriedBy>();
@@ -642,62 +720,196 @@ fn nest_task_advance(
             NestTask::HaulFood { step } => {
                 match step {
                     HaulStep::GoToEntrance => {
-                        if path_complete {
-                            if let Some(goal) = find_label_cell(&grid, LABEL_ENTRANCE) {
-                                if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
-                                    commands.entity(entity).insert(NestPath::new(waypoints));
-                                }
-                            }
-                            *step = HaulStep::PickUpFood;
-                        }
-                    }
-                    HaulStep::PickUpFood => {
-                        if path_complete {
-                            // Hauler "picks up" food at entrance (already in colony_food).
-                            *step = HaulStep::GoToStorage;
-                        }
-                    }
-                    HaulStep::GoToStorage => {
-                        if path_complete {
-                            if let Some(goal) = find_label_cell(&grid, LABEL_FOOD_STORAGE) {
-                                if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
-                                    commands.entity(entity).insert(NestPath::new(waypoints));
-                                }
-                            }
-                            *step = HaulStep::DropFood;
-                        }
-                    }
-                    HaulStep::DropFood => {
-                        // Task complete.
-                    }
-                }
-            }
-
-            NestTask::AttendQueen { step } => {
-                match step {
-                    AttendStep::GoToQueen => {
-                        if path_complete {
-                            if let Some(goal) = find_label_cell(&grid, LABEL_QUEEN) {
-                                if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
-                                    commands.entity(entity).insert(NestPath::new(waypoints));
-                                    *step = AttendStep::Walking;
+                        if at_destination {
+                            if path.is_some() {
+                                *step = HaulStep::PickUpFood;
+                            } else {
+                                if let Some(goal) = find_label_cell(&grid, LABEL_ENTRANCE) {
+                                    if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
+                                        commands.entity(entity).insert(NestPath::new(waypoints));
+                                    } else {
+                                        *task = NestTask::Idle { timer: 0.0 };
+                                        continue;
+                                    }
                                 } else {
                                     *task = NestTask::Idle { timer: 0.0 };
                                     continue;
                                 }
+                            }
+                        }
+                    }
+                    HaulStep::PickUpFood => {
+                        if at_destination {
+                            // Find nearest non-stacked food entity at entrance
+                            let mut best: Option<(Entity, f32)> = None;
+                            for (food_e, food_tf, _, stacked_opt) in &food_entity_query {
+                                // Only pick up food that isn't already stacked
+                                if stacked_opt.is_some() {
+                                    continue;
+                                }
+                                let food_pos = food_tf.translation.truncate();
+                                if let Some((gx, gy)) = world_to_nest_grid(food_pos) {
+                                    let cx = grid.width / 2;
+                                    // Entrance tunnel: column cx, rows 0-6
+                                    if gx == cx && gy <= 6 {
+                                        let dist = pos.distance(food_pos);
+                                        if best.is_none() || dist < best.unwrap().1 {
+                                            best = Some((food_e, dist));
+                                        }
+                                    }
+                                }
+                            }
+
+                            if let Some((food_entity, _)) = best {
+                                commands.entity(food_entity).insert(CarriedBy(entity));
+                                commands.entity(entity).remove::<NestPath>();
+                                *step = HaulStep::GoToStorage;
                             } else {
                                 *task = NestTask::Idle { timer: 0.0 };
                                 continue;
                             }
                         }
                     }
-                    AttendStep::Walking => {
-                        if path_complete {
-                            *step = AttendStep::Grooming;
+                    HaulStep::GoToStorage => {
+                        if at_destination {
+                            if path.is_some() {
+                                *step = HaulStep::DropFood;
+                            } else {
+                                if let Some(goal) = find_label_cell(&grid, LABEL_FOOD_STORAGE) {
+                                    if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
+                                        commands.entity(entity).insert(NestPath::new(waypoints));
+                                    } else {
+                                        *task = NestTask::Idle { timer: 0.0 };
+                                        continue;
+                                    }
+                                } else {
+                                    *task = NestTask::Idle { timer: 0.0 };
+                                    continue;
+                                }
+                            }
                         }
                     }
-                    AttendStep::Grooming => {
-                        // Grooming continues until utility re-evaluates.
+                    HaulStep::DropFood => {
+                        if at_destination {
+                            // Find carried food entity
+                            let carried_food = carried_food_query
+                                .iter()
+                                .find(|(_, carried_by)| carried_by.0 == entity);
+
+                            if let Some((food_e, _)) = carried_food {
+                                // Stack in food storage chamber
+                                if let Some(tile_pos) = stack_registry.find_available_tile(&grid, ChamberKind::FoodStorage) {
+                                    if let Some(stack_idx) = stack_registry.push(tile_pos, food_e) {
+                                        let base_pos = nest_grid_to_world(tile_pos.0, tile_pos.1);
+                                        let offset = stack_position_offset(stack_idx);
+
+                                        commands.entity(food_e).remove::<CarriedBy>();
+                                        commands.entity(food_e).insert((
+                                            StackedItem { grid_pos: tile_pos, stack_index: stack_idx },
+                                            Transform::from_xyz(base_pos.x + offset.x, base_pos.y + offset.y, 2.5),
+                                        ));
+                                    } else {
+                                        // Stack full, drop at current location
+                                        commands.entity(food_e).remove::<CarriedBy>();
+                                    }
+                                } else {
+                                    // No available tiles, drop at current location
+                                    commands.entity(food_e).remove::<CarriedBy>();
+                                }
+                            }
+                            *task = NestTask::Idle { timer: 0.0 };
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            NestTask::AttendQueen { step } => {
+                match step {
+                    AttendStep::GoToStorage => {
+                        if at_destination {
+                            if path.is_some() {
+                                *step = AttendStep::PickUpFood;
+                            } else {
+                                if let Some(goal) = find_label_cell(&grid, LABEL_FOOD_STORAGE) {
+                                    if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
+                                        commands.entity(entity).insert(NestPath::new(waypoints));
+                                    } else {
+                                        *task = NestTask::Idle { timer: 0.0 };
+                                        continue;
+                                    }
+                                } else {
+                                    *task = NestTask::Idle { timer: 0.0 };
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                    AttendStep::PickUpFood => {
+                        if at_destination {
+                            // Find nearest stacked food in storage.
+                            let storage_food = food_entity_query
+                                .iter()
+                                .filter(|(_, _, _, stacked_opt)| {
+                                    stacked_opt.map_or(false, |s| {
+                                        grid.get(s.grid_pos.0, s.grid_pos.1) == CellType::Chamber(ChamberKind::FoodStorage)
+                                    })
+                                })
+                                .min_by_key(|(_, food_tf, _, _)| {
+                                    (pos.distance(food_tf.translation.truncate()) * 100.0) as i32
+                                });
+
+                            if let Some((food_e, _, _, stacked_opt)) = storage_food {
+                                if let Some(stacked) = stacked_opt {
+                                    stack_registry.remove(stacked.grid_pos, food_e);
+                                }
+                                commands.entity(food_e).remove::<StackedItem>();
+                                commands.entity(food_e).insert(CarriedBy(entity));
+                                commands.entity(entity).remove::<NestPath>();
+                                *step = AttendStep::GoToQueen;
+                            } else {
+                                // No food available, go idle.
+                                *task = NestTask::Idle { timer: 0.0 };
+                                continue;
+                            }
+                        }
+                    }
+                    AttendStep::GoToQueen => {
+                        if at_destination {
+                            if path.is_some() {
+                                *step = AttendStep::FeedQueen;
+                            } else {
+                                if let Some(goal) = find_label_cell(&grid, LABEL_QUEEN) {
+                                    if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
+                                        commands.entity(entity).insert(NestPath::new(waypoints));
+                                    } else {
+                                        *task = NestTask::Idle { timer: 0.0 };
+                                        continue;
+                                    }
+                                } else {
+                                    *task = NestTask::Idle { timer: 0.0 };
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                    AttendStep::FeedQueen => {
+                        // Transfer food to queen — boost her satiation.
+                        if let Ok(mut hunger) = queen_hunger_query.get_single_mut() {
+                            hunger.satiation = (hunger.satiation + 1.0).min(2.0);
+                        }
+
+                        // Despawn carried food entity and decrement colony food.
+                        for (food_e, carried_by) in &carried_food_query {
+                            if carried_by.0 == entity {
+                                commands.entity(food_e).despawn();
+                                colony_food.stored -= 1.0;
+                                break;
+                            }
+                        }
+
+                        *task = NestTask::Idle { timer: 0.0 };
+                        continue;
                     }
                 }
             }
@@ -707,86 +919,108 @@ fn nest_task_advance(
 
                 match step {
                     DigStep::GoToFace => {
-                        if path_complete {
-                            // Pick a dig face target.
-                            let dig_faces = grid.find_dig_faces();
-                            if dig_faces.is_empty() {
-                                *task = NestTask::Idle { timer: 0.0 };
-                                continue;
-                            }
-                            // Score each face by: tunnel-shape bias, construction pheromone,
-                            // player zone bonus, penalized by distance.
-                            let mut rng = rand::thread_rng();
-                            let mut scored: Vec<((usize, usize), f32)> = dig_faces
-                                .iter()
-                                .map(|&(fx, fy)| {
-                                    let construction = phero_grid.get(fx, fy).construction;
-                                    let player_bonus = dig_zones_cells
-                                        .map_or(false, |cells| cells.contains(&(fx, fy)))
-                                        .then_some(0.5)
-                                        .unwrap_or(0.0);
-                                    let dx = fx as i32 - grid_pos.0 as i32;
-                                    let dy = fy as i32 - grid_pos.1 as i32;
-                                    let dist_sq = (dx * dx + dy * dy) as f32;
-                                    let proximity = 1.0 / (1.0 + dist_sq.sqrt() * 0.1);
-
-                                    // Tunnel-shape bias: count how many of the 4 cardinal
-                                    // neighbors are solid. More solid = extending a tunnel (good);
-                                    // fewer = widening a chamber (bad).
-                                    let solid_neighbors = [(-1i32, 0), (1, 0), (0, -1i32), (0, 1)]
-                                        .iter()
-                                        .filter(|&&(ndx, ndy)| {
-                                            let nx = fx as i32 + ndx;
-                                            let ny = fy as i32 + ndy;
-                                            nx >= 0
-                                                && ny >= 0
-                                                && (nx as usize) < grid.width
-                                                && (ny as usize) < grid.height
-                                                && !grid.get(nx as usize, ny as usize).is_passable()
-                                        })
-                                        .count();
-                                    // 3 solid → 1.0, 2 → 0.6, 1 → 0.3, 0 → 0.1
-                                    let narrowness = match solid_neighbors {
-                                        3 => 1.0,
-                                        2 => 0.6,
-                                        1 => 0.3,
-                                        _ => 0.1,
-                                    };
-
-                                    let score = (construction + player_bonus + 0.1) * proximity * narrowness;
-                                    let jitter = rng.gen_range(0.0..0.15);
-                                    ((fx, fy), score + jitter)
-                                })
-                                .collect();
-                            scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-                            let best = scored.first().map(|&(pos, _)| pos);
-                            if let Some(face) = best {
-                                *target_cell = Some(face);
-                                // Path to an adjacent passable cell.
-                                let adjacent = find_adjacent_passable(&grid, face.0, face.1);
-                                if let Some(adj) = adjacent {
-                                    if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, adj) {
-                                        commands.entity(entity).insert(NestPath::new(waypoints));
-                                    }
-                                }
+                        if at_destination {
+                            if path.is_some() {
+                                // Path existed and completed — advance to excavation.
                                 *step = DigStep::Excavate;
                             } else {
-                                *task = NestTask::Idle { timer: 0.0 };
-                                continue;
+                                // No path yet — pick a target and request path.
+                                let dig_faces = grid.find_dig_faces();
+                                if dig_faces.is_empty() {
+                                    *task = NestTask::Idle { timer: 0.0 };
+                                    continue;
+                                }
+                                let mut rng = rand::thread_rng();
+                                // Filter out faces with 5+ ants already targeting them.
+                                let available_faces: Vec<_> = dig_faces
+                                    .iter()
+                                    .copied()
+                                    .filter(|face| dig_target_counts.get(face).copied().unwrap_or(0) < 5)
+                                    .collect();
+                                let faces_to_score = if available_faces.is_empty() { &dig_faces } else { &available_faces };
+                                let mut scored: Vec<((usize, usize), f32)> = faces_to_score
+                                    .iter()
+                                    .map(|&(fx, fy)| {
+                                        let construction = phero_grid.get(fx, fy).construction;
+                                        let player_bonus = dig_zones_cells
+                                            .map_or(false, |cells| cells.contains(&(fx, fy)))
+                                            .then_some(0.5)
+                                            .unwrap_or(0.0);
+                                        let dx = fx as i32 - grid_pos.0 as i32;
+                                        let dy = fy as i32 - grid_pos.1 as i32;
+                                        let dist_sq = (dx * dx + dy * dy) as f32;
+                                        let proximity = 1.0 / (1.0 + dist_sq.sqrt() * 0.1);
+
+                                        let solid_neighbors = [(-1i32, 0), (1, 0), (0, -1i32), (0, 1)]
+                                            .iter()
+                                            .filter(|&&(ndx, ndy)| {
+                                                let nx = fx as i32 + ndx;
+                                                let ny = fy as i32 + ndy;
+                                                nx >= 0
+                                                    && ny >= 0
+                                                    && (nx as usize) < grid.width
+                                                    && (ny as usize) < grid.height
+                                                    && !grid.get(nx as usize, ny as usize).is_passable()
+                                            })
+                                            .count();
+                                        let narrowness = match solid_neighbors {
+                                            3 => 1.0,
+                                            2 => 0.6,
+                                            1 => 0.3,
+                                            _ => 0.1,
+                                        };
+
+                                        let score = (construction + player_bonus + 0.1) * proximity * narrowness;
+                                        let jitter = rng.gen_range(0.0..0.15);
+                                        ((fx, fy), score + jitter)
+                                    })
+                                    .collect();
+                                scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                                let best = scored.first().map(|&(pos, _)| pos);
+                                if let Some(face) = best {
+                                    *target_cell = Some(face);
+                                    let adjacent = find_adjacent_passable(&grid, face.0, face.1);
+                                    if let Some(adj) = adjacent {
+                                        if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, adj) {
+                                            commands.entity(entity).insert(NestPath::new(waypoints));
+                                        } else {
+                                            *task = NestTask::Idle { timer: 0.0 };
+                                            continue;
+                                        }
+                                    } else {
+                                        *task = NestTask::Idle { timer: 0.0 };
+                                        continue;
+                                    }
+                                } else {
+                                    *task = NestTask::Idle { timer: 0.0 };
+                                    continue;
+                                }
                             }
                         }
                     }
                     DigStep::Excavate => {
-                        if path_complete {
+                        if at_destination {
                             if let Some((tx, ty)) = *target_cell {
                                 let cell = grid.get(tx, ty);
+                                if !cell.is_diggable() {
+                                    // Target was already dug by another ant — pick a new face.
+                                    *dig_timer = 0.0;
+                                    *target_cell = None;
+                                    commands.entity(entity).remove::<NestPath>();
+                                    *step = DigStep::GoToFace;
+                                    continue;
+                                }
                                 let duration = cell.dig_duration();
                                 *dig_timer += dt;
                                 if *dig_timer >= duration {
                                     *dig_timer = 0.0;
                                     // Mark cell for excavation via marker component.
                                     commands.entity(entity).insert(ExcavatedCell { x: tx, y: ty });
-                                    *step = DigStep::PickUpSoil;
+                                    // Soil magically disappears — immediately look for next face.
+                                    *target_cell = None;
+                                    commands.entity(entity).remove::<NestPath>();
+                                    *step = DigStep::GoToFace;
+                                    continue;
                                 }
                             } else {
                                 *task = NestTask::Idle { timer: 0.0 };
@@ -794,22 +1028,10 @@ fn nest_task_advance(
                             }
                         }
                     }
-                    DigStep::PickUpSoil => {
-                        // Ant "picks up" excavated soil, move to midden.
-                        *step = DigStep::GoToMidden;
-                    }
-                    DigStep::GoToMidden => {
-                        if path_complete {
-                            if let Some(goal) = find_label_cell(&grid, LABEL_MIDDEN) {
-                                if let Some(waypoints) = path_cache.find_path(&grid, grid_pos, goal) {
-                                    commands.entity(entity).insert(NestPath::new(waypoints));
-                                }
-                            }
-                            *step = DigStep::DropSoil;
-                        }
-                    }
-                    DigStep::DropSoil => {
-                        // Task complete — will be re-evaluated next cycle.
+                    // PickUpSoil, GoToMidden, DropSoil unused — soil vanishes on excavation.
+                    _ => {
+                        *task = NestTask::Idle { timer: 0.0 };
+                        continue;
                     }
                 }
             }
@@ -829,16 +1051,28 @@ struct BroodFed;
 #[derive(Component)]
 struct BroodRelocated;
 
-/// Update carried brood positions to follow the ant carrying them.
-fn update_carried_brood_positions(
+/// Update carried item positions to follow the ant carrying them.
+fn update_carried_item_positions(
     ant_query: Query<(Entity, &Transform), With<NestTask>>,
-    mut brood_query: Query<(&mut Transform, &CarriedBy), (With<Brood>, Without<NestTask>)>,
+    mut item_query: Query<(&mut Transform, &CarriedBy), (Or<(With<Brood>, With<FoodEntity>)>, Without<NestTask>)>,
 ) {
-    for (mut brood_tf, carried_by) in &mut brood_query {
+    for (mut item_tf, carried_by) in &mut item_query {
         if let Ok((_, ant_tf)) = ant_query.get(carried_by.0) {
-            // Position brood at ant's location with slight offset.
-            brood_tf.translation.x = ant_tf.translation.x;
-            brood_tf.translation.y = ant_tf.translation.y + 3.0;
+            // Position item at ant's location with slight offset.
+            item_tf.translation.x = ant_tf.translation.x;
+            item_tf.translation.y = ant_tf.translation.y + 3.0;
+        }
+    }
+}
+
+fn cleanup_orphaned_carried_items(
+    mut commands: Commands,
+    item_query: Query<(Entity, &CarriedBy), Or<(With<FoodEntity>, With<Brood>)>>,
+    ant_query: Query<(), With<NestTask>>,
+) {
+    for (item_entity, carried_by) in &item_query {
+        if ant_query.get(carried_by.0).is_err() {
+            commands.entity(item_entity).remove::<CarriedBy>();
         }
     }
 }

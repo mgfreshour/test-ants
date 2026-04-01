@@ -3,6 +3,7 @@ use rand::Rng;
 
 use crate::components::ant::{Ant, AntState, CarriedItem, ColonyMember, Follower, Health, Movement, PlayerControlled, PositionHistory, TrailSense};
 use crate::components::map::{MapId, MapMarker, MapPortal};
+use crate::components::nest::FoodEntity;
 
 /// Hunger increases per second of simulation time. At this rate an ant goes
 /// from 0 → 1.0 in ~100 seconds of sim time.
@@ -18,9 +19,11 @@ const DEPOSIT_HUNGER_RELIEF: f32 = 0.3;
 use crate::components::pheromone::PheromoneType;
 use crate::components::terrain::FoodSource;
 use crate::resources::active_map::MapRegistry;
+use crate::resources::nest::NestGrid;
 use crate::resources::pheromone::{ColonyPheromones, PheromoneConfig};
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 use crate::resources::spatial_grid::SpatialGrid;
+use crate::plugins::nest::nest_grid_to_world;
 
 pub struct AntAiPlugin;
 
@@ -413,6 +416,7 @@ fn nest_food_deposit(
     registry: Res<MapRegistry>,
     portal_query: Query<&MapPortal>,
     mut food_query: Query<&mut ColonyFood, With<MapMarker>>,
+    map_query: Query<&NestGrid, With<MapMarker>>,
     mut ant_query: Query<
         (Entity, &Transform, &mut Ant, &ColonyMember, &MapId, &CarriedItem, &mut PositionHistory),
     >,
@@ -443,6 +447,33 @@ fn nest_food_deposit(
         if let Some(portal) = deposit_target {
             if let Ok(mut food) = food_query.get_mut(portal.target_map) {
                 food.stored += carried.food_amount;
+
+                // Spawn physical food entities at entrance
+                if let Ok(grid) = map_query.get(portal.target_map) {
+                    let mut rng = rand::thread_rng();
+                    let num_entities = carried.food_amount.floor() as usize;
+                    let cx = grid.width / 2;
+                    for i in 0..num_entities {
+                        let gy = (i % 7).min(6);  // spread across entrance tunnel
+                        let world_pos = nest_grid_to_world(cx, gy);
+                        let jitter = Vec2::new(
+                            rng.gen_range(-3.0..3.0),
+                            rng.gen_range(-3.0..3.0),
+                        );
+
+                        commands.spawn((
+                            Sprite {
+                                color: Color::srgb(0.9, 0.7, 0.2),
+                                custom_size: Some(Vec2::splat(5.0)),
+                                ..default()
+                            },
+                            Transform::from_xyz(world_pos.x + jitter.x, world_pos.y + jitter.y, 2.5),
+                            Visibility::Hidden,
+                            FoodEntity::new(1.0),
+                            MapId(portal.target_map),
+                        ));
+                    }
+                }
             }
             commands.entity(ant_entity).remove::<CarriedItem>();
             ant.hunger = (ant.hunger - DEPOSIT_HUNGER_RELIEF).max(0.0);

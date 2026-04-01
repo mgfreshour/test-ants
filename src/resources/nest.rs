@@ -141,3 +141,51 @@ impl NestGrid {
 pub struct PlayerDigZones {
     pub cells: std::collections::HashSet<(usize, usize)>,
 }
+
+#[derive(Component, Default)]
+pub struct TileStackRegistry {
+    pub stacks: std::collections::HashMap<(usize, usize), Vec<Entity>>,
+}
+
+impl TileStackRegistry {
+    pub fn push(&mut self, grid_pos: (usize, usize), entity: Entity) -> Option<u8> {
+        let stack = self.stacks.entry(grid_pos).or_insert_with(Vec::new);
+        if stack.len() >= 5 { return None; }
+        stack.push(entity);
+        Some((stack.len() - 1) as u8)
+    }
+
+    pub fn remove(&mut self, grid_pos: (usize, usize), entity: Entity) {
+        if let Some(stack) = self.stacks.get_mut(&grid_pos) {
+            stack.retain(|&e| e != entity);
+            if stack.is_empty() { self.stacks.remove(&grid_pos); }
+        }
+    }
+
+    pub fn find_available_tile(&self, grid: &NestGrid, chamber: ChamberKind) -> Option<(usize, usize)> {
+        for y in 0..grid.height {
+            for x in 0..grid.width {
+                if grid.get(x, y) == CellType::Chamber(chamber) && self.count_at((x, y)) < 5 {
+                    return Some((x, y));
+                }
+            }
+        }
+        None
+    }
+
+    fn count_at(&self, grid_pos: (usize, usize)) -> usize {
+        self.stacks.get(&grid_pos).map_or(0, |s| s.len())
+    }
+}
+
+pub fn stack_position_offset(index: u8) -> Vec2 {
+    let offset = NEST_CELL_SIZE * 0.3;
+    match index {
+        0 => Vec2::new(0.0, 0.0),
+        1 => Vec2::new(-offset, offset),
+        2 => Vec2::new(offset, offset),
+        3 => Vec2::new(-offset, -offset),
+        4 => Vec2::new(offset, -offset),
+        _ => Vec2::ZERO,
+    }
+}

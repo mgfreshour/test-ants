@@ -339,12 +339,14 @@ fn player_attack(
 
 fn death_system(
     mut commands: Commands,
-    ant_query: Query<(Entity, &Transform, &Health), With<Ant>>,
+    ant_query: Query<(Entity, &Transform, &Health, &Ant), With<Ant>>,
     spider_query: Query<(Entity, &Transform, &Spider)>,
 ) {
-    for (entity, transform, health) in &ant_query {
+    for (entity, transform, health, ant) in &ant_query {
         if health.current <= 0.0 {
             let pos = transform.translation;
+            let reason = if ant.hunger >= 1.0 { "starvation" } else { "combat" };
+            info!("Ant died: reason={}, age={:.0}s, pos=({:.0},{:.0})", reason, ant.age, pos.x, pos.y);
             commands.entity(entity).despawn();
             commands.spawn((
                 Sprite {
