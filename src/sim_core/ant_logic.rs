@@ -43,6 +43,10 @@ pub fn surface_velocity(direction: Vec2, speed: f32, hunger: f32, dt: f32, hunge
     direction * speed * factor * dt
 }
 
+pub fn apply_deposit_hunger_relief(hunger: f32, relief: f32) -> f32 {
+    (hunger - relief).max(0.0)
+}
+
 pub fn apply_boundary_bounce(pos: Vec2, dir: Vec2, min: Vec2, max: Vec2) -> (Vec2, Vec2) {
     let mut next_pos = pos;
     let mut next_dir = dir;
@@ -78,6 +82,13 @@ mod tests {
     }
 
     #[test]
+    fn hunger_step_no_starvation_before_full_hunger() {
+        let (h, hp_loss) = hunger_tick_step(0.5, 1.0, 0.01, None, 0.5, 0.4, 0.5);
+        assert_eq!(h, 0.51);
+        assert_eq!(hp_loss, 0.0);
+    }
+
+    #[test]
     fn hunger_step_self_feeds_when_carrying() {
         let (h, _) = hunger_tick_step(0.6, 1.0, 0.0, Some(1.0), 0.5, 0.4, 0.5);
         assert_eq!(h, 0.2);
@@ -94,5 +105,11 @@ mod tests {
         assert_eq!(p, Vec2::new(0.0, 10.0));
         assert!(d.x >= 0.0);
         assert!(d.y <= 0.0);
+    }
+
+    #[test]
+    fn deposit_relief_never_goes_below_zero() {
+        assert_eq!(apply_deposit_hunger_relief(0.2, 0.5), 0.0);
+        assert_eq!(apply_deposit_hunger_relief(0.8, 0.3), 0.5);
     }
 }

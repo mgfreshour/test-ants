@@ -520,7 +520,7 @@ fn nest_food_deposit(
                 }
             }
             commands.entity(ant_entity).remove::<CarriedItem>();
-            ant.hunger = (ant.hunger - DEPOSIT_HUNGER_RELIEF).max(0.0);
+            ant.hunger = ant_logic::apply_deposit_hunger_relief(ant.hunger, DEPOSIT_HUNGER_RELIEF);
             ant.state = AntState::Foraging;
             history.clear();
         }

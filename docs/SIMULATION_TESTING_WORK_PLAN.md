@@ -44,7 +44,7 @@ Do not test:
        Why: reduces test boilerplate and encourages broad test coverage.
 8. [x] **W8 (P1/S)** Add unit tests for `SimSpeed`, clock tick, pause semantics, and dt scaling.  
        Why: protects foundational timing assumptions used by all systems.
-9. [ ] **W9 (P1/M)** Add unit tests for hunger/starvation/food-relief rules.  
+9. [x] **W9 (P1/M)** Add unit tests for hunger/starvation/food-relief rules.  
        Why: captures critical survival and economy interactions.
 10. [ ] **W10 (P1/M)** Add unit tests for food pickup/deposit and state transitions.  
         Why: verifies main foraging loop correctness.
