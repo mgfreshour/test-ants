@@ -42,3 +42,66 @@ pub fn next_dig_step_on_arrival(step: DigStep, path_exists: bool) -> Option<DigS
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn feed_step_progresses_on_completed_path() {
+        assert_eq!(
+            next_feed_step_on_arrival(FeedStep::GoToStorage, true),
+            Some(FeedStep::PickUpFood)
+        );
+        assert_eq!(
+            next_feed_step_on_arrival(FeedStep::GoToBrood, true),
+            Some(FeedStep::FindLarva)
+        );
+        assert_eq!(next_feed_step_on_arrival(FeedStep::GoToStorage, false), None);
+    }
+
+    #[test]
+    fn move_brood_step_progresses_on_completed_path() {
+        assert_eq!(
+            next_move_brood_step_on_arrival(MoveBroodStep::GoToQueen, true),
+            Some(MoveBroodStep::PickUpBrood)
+        );
+        assert_eq!(
+            next_move_brood_step_on_arrival(MoveBroodStep::GoToBrood, true),
+            Some(MoveBroodStep::PlaceBrood)
+        );
+    }
+
+    #[test]
+    fn haul_step_progresses_on_completed_path() {
+        assert_eq!(
+            next_haul_step_on_arrival(HaulStep::GoToEntrance, true),
+            Some(HaulStep::PickUpFood)
+        );
+        assert_eq!(
+            next_haul_step_on_arrival(HaulStep::GoToStorage, true),
+            Some(HaulStep::DropFood)
+        );
+    }
+
+    #[test]
+    fn attend_step_progresses_on_completed_path() {
+        assert_eq!(
+            next_attend_step_on_arrival(AttendStep::GoToStorage, true),
+            Some(AttendStep::PickUpFood)
+        );
+        assert_eq!(
+            next_attend_step_on_arrival(AttendStep::GoToQueen, true),
+            Some(AttendStep::FeedQueen)
+        );
+    }
+
+    #[test]
+    fn dig_step_progresses_on_completed_path() {
+        assert_eq!(
+            next_dig_step_on_arrival(DigStep::GoToFace, true),
+            Some(DigStep::Excavate)
+        );
+        assert_eq!(next_dig_step_on_arrival(DigStep::Excavate, true), None);
+    }
+}

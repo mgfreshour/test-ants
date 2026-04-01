@@ -52,7 +52,7 @@ Do not test:
         Why: prevents regressions in trail formation behavior.
 12. [x] **W12 (P1/M)** Add unit tests for nest utility scoring outcomes under varied colony conditions.  
         Why: ensures assignment logic remains explainable and tunable.
-13. [ ] **W13 (P1/L)** Add unit tests for nest task progression sub-steps (`Feed`, `MoveBrood`, `Haul`, `Dig`, `Attend`).  
+13. [x] **W13 (P1/L)** Add unit tests for nest task progression sub-steps (`Feed`, `MoveBrood`, `Haul`, `Dig`, `Attend`).  
         Why: protects high-complexity behavior chains with many edge cases.
 14. [ ] **W14 (P2/M)** Add property-style tests for invariants (no invalid states, bounded values, no negative food).  
         Why: catches broad classes of logic bugs early.
