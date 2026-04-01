@@ -1,18 +1,34 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::terrain::{FoodSource, NestEntrance};
-use crate::resources::simulation::SimConfig;
+use crate::components::map::MapId;
+use crate::components::terrain::FoodSource;
+use crate::resources::active_map::MapRegistry;
+use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 
 pub struct TerrainPlugin;
 
-impl Plugin for TerrainPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (setup_terrain, spawn_nest_entrance, spawn_food_sources));
+/// Average interval between random food drops (in sim-seconds).
+const FOOD_DROP_INTERVAL: f32 = 60.0;
+
+#[derive(Resource)]
+struct FoodDropTimer(f32);
+
+impl Default for FoodDropTimer {
+    fn default() -> Self {
+        Self(FOOD_DROP_INTERVAL)
     }
 }
 
-fn setup_terrain(mut commands: Commands, config: Res<SimConfig>) {
+impl Plugin for TerrainPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<FoodDropTimer>()
+            .add_systems(Startup, (setup_terrain, spawn_food_sources))
+            .add_systems(Update, random_food_drops);
+    }
+}
+
+fn setup_terrain(mut commands: Commands, config: Res<SimConfig>, registry: Res<MapRegistry>) {
     let tile_count_x = (config.world_width / config.tile_size) as i32;
     let tile_count_y = (config.world_height / config.tile_size) as i32;
 
@@ -37,27 +53,13 @@ fn setup_terrain(mut commands: Commands, config: Res<SimConfig>) {
                     ..default()
                 },
                 Transform::from_xyz(world_x, world_y, 0.0),
+                MapId(registry.surface),
             ));
         }
     }
 }
 
-fn spawn_nest_entrance(mut commands: Commands, config: Res<SimConfig>) {
-    let nest_pos = config.nest_position;
-    let size = config.tile_size * 3.0;
-
-    commands.spawn((
-        Sprite {
-            color: Color::srgb(0.35, 0.22, 0.1),
-            custom_size: Some(Vec2::new(size, size)),
-            ..default()
-        },
-        Transform::from_xyz(nest_pos.x, nest_pos.y, 1.0),
-        NestEntrance { colony_id: 0 },
-    ));
-}
-
-fn spawn_food_sources(mut commands: Commands, config: Res<SimConfig>) {
+fn spawn_food_sources(mut commands: Commands, config: Res<SimConfig>, registry: Res<MapRegistry>) {
     let mut rng = rand::thread_rng();
     let nest = config.nest_position;
     let margin = 150.0;
@@ -96,6 +98,61 @@ fn spawn_food_sources(mut commands: Commands, config: Res<SimConfig>) {
                 remaining: *amount,
                 max: *amount,
             },
+            MapId(registry.surface),
         ));
     }
+}
+
+/// Periodically spawn a random food source on the surface.
+fn random_food_drops(
+    clock: Res<SimClock>,
+    time: Res<Time>,
+    config: Res<SimConfig>,
+    registry: Res<MapRegistry>,
+    mut timer: ResMut<FoodDropTimer>,
+    mut commands: Commands,
+    food_query: Query<&FoodSource>,
+) {
+    if clock.speed == SimSpeed::Paused {
+        return;
+    }
+
+    let dt = time.delta_secs() * clock.speed.multiplier();
+    timer.0 -= dt;
+    if timer.0 > 0.0 {
+        return;
+    }
+
+    // Reset timer with some randomness (±30%)
+    let mut rng = rand::thread_rng();
+    timer.0 = FOOD_DROP_INTERVAL * rng.gen_range(0.7..1.3);
+
+    // Cap total food sources on the map to avoid unbounded growth
+    if food_query.iter().count() >= 20 {
+        return;
+    }
+
+    let margin = 100.0;
+    let x = rng.gen_range(margin..config.world_width - margin);
+    let y = rng.gen_range(margin..config.world_height - margin);
+
+    // Random size: small crumbs to medium piles
+    let amount = rng.gen_range(15.0..80.0);
+    let size = if amount > 50.0 { 12.0 } else { 6.0 };
+    let green_tint = rng.gen_range(0.5..0.9);
+    let color = Color::srgb(green_tint + 0.1, green_tint, rng.gen_range(0.1..0.3));
+
+    commands.spawn((
+        Sprite {
+            color,
+            custom_size: Some(Vec2::splat(size)),
+            ..default()
+        },
+        Transform::from_xyz(x, y, 1.5),
+        FoodSource {
+            remaining: amount,
+            max: amount,
+        },
+        MapId(registry.surface),
+    ));
 }

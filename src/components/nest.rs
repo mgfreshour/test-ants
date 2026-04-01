@@ -66,6 +66,10 @@ pub struct NestTile {
 #[derive(Component)]
 pub struct Queen;
 
+/// Marks a brood entity as being physically carried by an ant.
+#[derive(Component)]
+pub struct CarriedBy(pub Entity);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BroodStage {
     Egg,
@@ -78,6 +82,8 @@ pub struct Brood {
     pub stage: BroodStage,
     pub timer: f32,
     pub fed: bool,
+    /// Whether this brood has been moved from the queen chamber to the brood chamber.
+    pub relocated: bool,
 }
 
 impl Brood {
@@ -86,6 +92,7 @@ impl Brood {
             stage: BroodStage::Egg,
             timer: 0.0,
             fed: false,
+            relocated: false,
         }
     }
 
@@ -128,10 +135,19 @@ impl NestPath {
 #[derive(Component, Debug, Clone)]
 pub enum NestTask {
     FeedLarva { step: FeedStep, target_larva: Option<Entity> },
+    MoveBrood { step: MoveBroodStep, target_brood: Option<Entity> },
     HaulFood { step: HaulStep },
     AttendQueen { step: AttendStep },
     Dig { step: DigStep, target_cell: Option<GridPos>, dig_timer: f32 },
     Idle { timer: f32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoveBroodStep {
+    GoToQueen,
+    PickUpBrood,
+    GoToBrood,
+    PlaceBrood,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,6 +187,7 @@ impl NestTask {
     pub fn label(&self) -> &'static str {
         match self {
             NestTask::FeedLarva { .. } => "N",
+            NestTask::MoveBrood { .. } => "M",
             NestTask::HaulFood { .. } => "H",
             NestTask::AttendQueen { .. } => "Q",
             NestTask::Dig { .. } => "D",
@@ -181,6 +198,7 @@ impl NestTask {
     pub fn color(&self) -> Color {
         match self {
             NestTask::FeedLarva { .. } => Color::srgb(0.8, 0.6, 1.0),
+            NestTask::MoveBrood { .. } => Color::srgb(1.0, 0.7, 0.8),
             NestTask::HaulFood { .. } => Color::srgb(0.6, 0.9, 0.3),
             NestTask::AttendQueen { .. } => Color::srgb(1.0, 0.8, 0.2),
             NestTask::Dig { .. } => Color::srgb(0.7, 0.5, 0.3),

@@ -133,7 +133,7 @@ struct CachedPath {
 
 /// Path cache — avoids redundant A* queries.
 /// Invalidated when nest grid changes (new tunnel dug).
-#[derive(Resource)]
+#[derive(Component)]
 pub struct NestPathCache {
     cache: HashMap<(GridPos, GridPos), CachedPath>,
     pub generation: u32,

@@ -1,16 +1,30 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::ant::{Ant, AntState, CarriedItem, ColonyMember, Follower, Health, Movement, PlayerControlled, PositionHistory, TrailSense, Underground};
+use crate::components::ant::{Ant, AntState, CarriedItem, ColonyMember, Follower, Health, Movement, PlayerControlled, PositionHistory, TrailSense};
+use crate::components::map::{MapId, MapMarker, MapPortal};
+
+/// Hunger increases per second of simulation time. At this rate an ant goes
+/// from 0 → 1.0 in ~100 seconds of sim time.
+const HUNGER_RATE: f32 = 0.01;
+/// Above this hunger threshold ants slow down.
+const HUNGER_SLOW_THRESHOLD: f32 = 0.8;
+/// Movement speed multiplier when very hungry.
+const HUNGER_SLOW_FACTOR: f32 = 0.7;
+/// HP lost per second when hunger is at 1.0 (starvation).
+const STARVATION_DPS: f32 = 0.5;
+/// Hunger reduction when a forager deposits food at the nest ("taste reward").
+const DEPOSIT_HUNGER_RELIEF: f32 = 0.3;
 use crate::components::pheromone::PheromoneType;
-use crate::components::terrain::{FoodSource, NestEntrance};
+use crate::components::terrain::FoodSource;
+use crate::resources::active_map::MapRegistry;
 use crate::resources::pheromone::{ColonyPheromones, PheromoneConfig};
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 use crate::resources::spatial_grid::SpatialGrid;
 
 pub struct AntAiPlugin;
 
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 pub struct ColonyFood {
     pub stored: f32,
 }
@@ -18,12 +32,12 @@ pub struct ColonyFood {
 impl Plugin for AntAiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SpatialGrid>()
-            .init_resource::<ColonyFood>()
             .add_systems(Startup, spawn_initial_ants)
             .add_systems(
                 Update,
                 (
                     rebuild_spatial_grid,
+                    hunger_tick,
                     fix_orphaned_returners,
                     ant_forage_steering,
                     ant_return_steering,
@@ -43,7 +57,7 @@ impl Plugin for AntAiPlugin {
     }
 }
 
-fn spawn_initial_ants(mut commands: Commands, config: Res<SimConfig>) {
+fn spawn_initial_ants(mut commands: Commands, config: Res<SimConfig>, registry: Res<MapRegistry>) {
     let mut rng = rand::thread_rng();
     let nest = config.nest_position;
 
@@ -64,6 +78,7 @@ fn spawn_initial_ants(mut commands: Commands, config: Res<SimConfig>) {
             ColonyMember { colony_id: 0 },
             PositionHistory::default(),
             TrailSense::default(),
+            MapId(registry.surface),
         ));
     }
 }
@@ -90,6 +105,39 @@ const TRAIL_EPOCH_RATE: f32 = 0.33; // re-evaluate roughly every 3 seconds
 /// Minimum local pheromone intensity for an ant to sense a trail at all.
 /// Below this the concentration is too faint to follow, even if a gradient exists.
 const MIN_SENSE_INTENSITY: f32 = 1.5;
+
+/// Increase hunger over time. Hungry ants slow down; starving ants take damage.
+/// Ants carrying food can self-feed when hunger gets high enough.
+fn hunger_tick(
+    clock: Res<SimClock>,
+    time: Res<Time>,
+    mut commands: Commands,
+    mut query: Query<(Entity, &mut Ant, &mut Health, Option<&CarriedItem>)>,
+) {
+    if clock.speed == SimSpeed::Paused {
+        return;
+    }
+
+    let dt = time.delta_secs() * clock.speed.multiplier();
+
+    for (entity, mut ant, mut health, carried) in &mut query {
+        ant.hunger = (ant.hunger + HUNGER_RATE * dt).min(1.0);
+
+        // Self-feed: if hungry and carrying food, consume some
+        if ant.hunger > 0.5 {
+            if let Some(carried) = carried {
+                let relief = (carried.food_amount * 0.1).min(ant.hunger);
+                ant.hunger = (ant.hunger - relief).max(0.0);
+                commands.entity(entity).remove::<CarriedItem>();
+            }
+        }
+
+        // Starvation damage
+        if ant.hunger >= 1.0 {
+            health.current -= STARVATION_DPS * dt;
+        }
+    }
+}
 
 /// Reset ants stuck in invalid states back to Foraging.
 fn fix_orphaned_returners(
@@ -223,13 +271,14 @@ fn ant_forage_steering(
 }
 
 /// Returning ants: follow HOME pheromone gradient back to nest.
-/// Within SENSE_RANGE of the nest, head straight for it.
+/// Within SENSE_RANGE of the nearest matching portal, head straight for it.
 fn ant_return_steering(
     clock: Res<SimClock>,
     config: Res<SimConfig>,
     grids: Option<Res<ColonyPheromones>>,
-    nest_query: Query<(&Transform, &NestEntrance)>,
-    mut query: Query<(&Transform, &mut Movement, &Ant, &ColonyMember, &PositionHistory, &mut TrailSense), (With<CarriedItem>, Without<PlayerControlled>)>,
+    registry: Res<MapRegistry>,
+    portal_query: Query<&MapPortal>,
+    mut query: Query<(&Transform, &mut Movement, &Ant, &ColonyMember, &MapId, &PositionHistory, &mut TrailSense), (With<CarriedItem>, Without<PlayerControlled>)>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -238,18 +287,28 @@ fn ant_return_steering(
     let mut rng = rand::thread_rng();
     let noise = config.exploration_noise * 0.5;
 
-    for (transform, mut movement, ant, colony, history, mut sense) in &mut query {
+    for (transform, mut movement, ant, colony, map_id, history, mut sense) in &mut query {
         if ant.state != AntState::Returning {
             continue;
         }
 
-        let nest_pos = nest_query
-            .iter()
-            .find(|(_, ne)| ne.colony_id == colony.colony_id)
-            .map(|(t, _)| t.translation.truncate())
-            .unwrap_or(config.nest_position);
-
         let pos = transform.translation.truncate();
+
+        // Find the nearest portal on this ant's map leading toward a nest.
+        let nest_pos = portal_query
+            .iter()
+            .filter(|p| {
+                p.map == map_id.0
+                    && p.target_map != registry.surface
+                    && p.colony_id.map_or(true, |id| id == colony.colony_id)
+            })
+            .min_by(|a, b| {
+                pos.distance(a.position)
+                    .partial_cmp(&pos.distance(b.position))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|p| p.position)
+            .unwrap_or(config.nest_position);
         let to_nest = nest_pos - pos;
         let dist_to_nest = to_nest.length();
 
@@ -347,40 +406,46 @@ fn food_detection_and_pickup(
 
 const NEST_DEPOSIT_RANGE: f32 = 30.0;
 
-/// Returning ants near the nest deposit food
+/// Returning ants near a portal deposit food into the portal's target nest.
 fn nest_food_deposit(
     clock: Res<SimClock>,
     mut commands: Commands,
-    config: Res<SimConfig>,
-    mut colony_food: ResMut<ColonyFood>,
-    nest_query: Query<(&Transform, &NestEntrance)>,
+    registry: Res<MapRegistry>,
+    portal_query: Query<&MapPortal>,
+    mut food_query: Query<&mut ColonyFood, With<MapMarker>>,
     mut ant_query: Query<
-        (Entity, &Transform, &mut Ant, &ColonyMember, &CarriedItem, &mut PositionHistory),
+        (Entity, &Transform, &mut Ant, &ColonyMember, &MapId, &CarriedItem, &mut PositionHistory),
     >,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
     }
 
-    for (ant_entity, ant_transform, mut ant, colony, carried, mut history) in &mut ant_query {
+    for (ant_entity, ant_transform, mut ant, colony, map_id, carried, mut history) in &mut ant_query {
         if ant.state != AntState::Returning {
             continue;
         }
 
-        let nest_pos = nest_query
-            .iter()
-            .find(|(_, ne)| ne.colony_id == colony.colony_id)
-            .map(|(t, _)| t.translation.truncate())
-            .unwrap_or(config.nest_position);
+        // Only surface ants deposit food at portals.
+        if map_id.0 != registry.surface {
+            continue;
+        }
 
         let ant_pos = ant_transform.translation.truncate();
-        let dist = ant_pos.distance(nest_pos);
 
-        if dist < NEST_DEPOSIT_RANGE {
-            if colony.colony_id == 0 {
-                colony_food.stored += carried.food_amount;
+        // Find a portal on the surface leading to a nest that matches this colony.
+        let deposit_target = portal_query.iter().find(|p| {
+            p.map == registry.surface
+                && p.colony_id.map_or(true, |id| id == colony.colony_id)
+                && ant_pos.distance(p.position) < NEST_DEPOSIT_RANGE
+        });
+
+        if let Some(portal) = deposit_target {
+            if let Ok(mut food) = food_query.get_mut(portal.target_map) {
+                food.stored += carried.food_amount;
             }
             commands.entity(ant_entity).remove::<CarriedItem>();
+            ant.hunger = (ant.hunger - DEPOSIT_HUNGER_RELIEF).max(0.0);
             ant.state = AntState::Foraging;
             history.clear();
         }
@@ -431,7 +496,8 @@ fn ant_pheromone_deposit(
 fn ant_movement(
     clock: Res<SimClock>,
     time: Res<Time>,
-    mut query: Query<(&mut Transform, &Movement), (With<Ant>, Without<PlayerControlled>, Without<Underground>)>,
+    registry: Res<MapRegistry>,
+    mut query: Query<(&mut Transform, &Movement, &Ant, &MapId), Without<PlayerControlled>>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -439,8 +505,17 @@ fn ant_movement(
 
     let dt = time.delta_secs() * clock.speed.multiplier();
 
-    for (mut transform, movement) in &mut query {
-        let velocity = movement.direction * movement.speed * dt;
+    for (mut transform, movement, ant, map_id) in &mut query {
+        // Surface movement only applies to surface ants.
+        if map_id.0 != registry.surface {
+            continue;
+        }
+        let hunger_factor = if ant.hunger > HUNGER_SLOW_THRESHOLD {
+            HUNGER_SLOW_FACTOR
+        } else {
+            1.0
+        };
+        let velocity = movement.direction * movement.speed * hunger_factor * dt;
         transform.translation.x += velocity.x;
         transform.translation.y += velocity.y;
     }
@@ -462,7 +537,8 @@ fn record_position_history(
 fn ant_boundary_bounce(
     clock: Res<SimClock>,
     config: Res<SimConfig>,
-    mut query: Query<(&mut Transform, &mut Movement), (With<Ant>, Without<Underground>)>,
+    registry: Res<MapRegistry>,
+    mut query: Query<(&mut Transform, &mut Movement, &MapId), With<Ant>>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -474,7 +550,11 @@ fn ant_boundary_bounce(
     let min_y = margin;
     let max_y = config.world_height - margin;
 
-    for (mut transform, mut movement) in &mut query {
+    for (mut transform, mut movement, map_id) in &mut query {
+        // Boundary bounce only applies to surface ants.
+        if map_id.0 != registry.surface {
+            continue;
+        }
         let pos = &mut transform.translation;
 
         if pos.x <= min_x {

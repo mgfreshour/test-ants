@@ -2,10 +2,11 @@ use bevy::prelude::*;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 
 use crate::components::ant::{Ant, AntState, CarriedItem, PlayerControlled};
+use crate::components::map::MapMarker;
 use crate::plugins::ant_ai::ColonyFood;
-use crate::plugins::nest::GameView;
 use crate::plugins::player::{FollowerCount, PlayerMode};
 use crate::plugins::pheromone::{OverlayDisplay, OverlayState};
+use crate::resources::active_map::{ActiveMap, MapRegistry};
 use crate::resources::colony::ColonyStats;
 use crate::resources::simulation::SimClock;
 
@@ -43,11 +44,12 @@ fn setup_hud(mut commands: Commands) {
 fn update_hud(
     clock: Res<SimClock>,
     overlay: Res<OverlayState>,
-    colony_food: Res<ColonyFood>,
+    registry: Res<MapRegistry>,
+    active: Res<ActiveMap>,
     stats: Res<ColonyStats>,
     player_mode: Res<PlayerMode>,
     _followers: Res<FollowerCount>,
-    view: Res<State<GameView>>,
+    food_query: Query<&ColonyFood, With<MapMarker>>,
     diagnostics: Res<DiagnosticsStore>,
     ant_query: Query<(&Ant, Option<&CarriedItem>)>,
     player_query: Query<Option<&CarriedItem>, With<PlayerControlled>>,
@@ -65,18 +67,22 @@ fn update_hud(
     let pop = stats.workers + stats.soldiers + stats.drones;
     let brood = stats.eggs + stats.larvae + stats.pupae;
 
-    match view.get() {
-        GameView::Underground => {
+    // Read food from the player nest map entity.
+    let food_stored = food_query.get(registry.player_nest).map_or(0.0, |f| f.stored);
+
+    use crate::components::map::MapKind;
+    match active.kind {
+        MapKind::Nest { .. } => {
             **text = format!(
                 "[NEST] Pop:{} Brood:{}  |  Food:{:.0}  |  {}  |  FPS:{:.0}\n\
                  Tab:surface",
                 pop, brood,
-                colony_food.stored,
+                food_stored,
                 clock.speed.label(),
                 fps,
             );
         }
-        GameView::Surface => {
+        MapKind::Surface => {
             let mut foraging = 0u32;
             let mut returning = 0u32;
             let mut following = 0u32;
@@ -115,12 +121,21 @@ fn update_hud(
                  WASD:move E:pick Q:drop Shift:trail R:recruit T:dismiss X:swap F:cam/ant Tab:nest",
                 mode_str,
                 pop, brood,
-                colony_food.stored,
+                food_stored,
                 foraging, returning, following,
                 clock.speed.label(),
                 overlay_label,
                 fps,
                 player_carrying,
+            );
+        }
+        MapKind::SpecialZone { zone_id } => {
+            **text = format!(
+                "[ZONE {}]  |  {}  |  FPS:{:.0}\n\
+                 Tab:return",
+                zone_id,
+                clock.speed.label(),
+                fps,
             );
         }
     }

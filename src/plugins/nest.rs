@@ -2,32 +2,18 @@ use bevy::prelude::*;
 use rand::Rng;
 
 use crate::components::ant::{Ant, Caste, ColonyMember, Health, Movement, PositionHistory, TrailSense};
-use crate::components::nest::{Brood, BroodStage, CellType, NestTile, Queen};
+use crate::components::map::{MapId, MapKind, MapMarker, spawn_portal_pair};
+use crate::components::nest::{Brood, BroodStage, CellType, ChamberKind, NestTile, Queen};
 use crate::plugins::ant_ai::ColonyFood;
-use crate::resources::colony::{CasteRatios, ColonyStats};
-use crate::resources::nest::{NestGrid, NEST_CELL_SIZE, NEST_HEIGHT, NEST_WIDTH};
+use crate::plugins::camera::MainCamera;
+use crate::resources::active_map::{ActiveMap, MapRegistry, SavedCamera, SavedCameraStates};
+use crate::resources::colony::{BehaviorSliders, CasteRatios, ColonyStats};
+use crate::resources::nest::{NestGrid, PlayerDigZones, NEST_CELL_SIZE, NEST_HEIGHT, NEST_WIDTH};
+use crate::resources::nest_pathfinding::NestPathCache;
+use crate::resources::nest_pheromone::NestPheromoneGrid;
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 
 pub struct NestPlugin;
-
-#[derive(Component)]
-pub struct NestViewEntity;
-
-#[derive(Component)]
-pub struct SurfaceViewEntity;
-
-#[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum GameView {
-    #[default]
-    Surface,
-    Underground,
-}
-
-#[derive(Resource, Default)]
-struct SavedSurfaceCamera {
-    position: Vec2,
-    scale: f32,
-}
 
 #[derive(Component)]
 struct FoodStorageIndicator {
@@ -36,6 +22,9 @@ struct FoodStorageIndicator {
 
 const QUEEN_EGG_INTERVAL: f32 = 10.0;
 const QUEEN_FOOD_COST: f32 = 2.0;
+
+/// Default nest-view camera scale.
+const NEST_CAMERA_SCALE: f32 = 0.7;
 
 fn nest_grid_to_world(gx: usize, gy: usize) -> Vec2 {
     let offset_x = -(NEST_WIDTH as f32 * NEST_CELL_SIZE) / 2.0;
@@ -48,29 +37,85 @@ fn nest_grid_to_world(gx: usize, gy: usize) -> Vec2 {
 
 impl Plugin for NestPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<NestGrid>()
-            .init_resource::<ColonyStats>()
+        app.init_resource::<ColonyStats>()
             .init_resource::<CasteRatios>()
-            .init_resource::<SavedSurfaceCamera>()
-            .init_state::<GameView>()
-            .add_systems(Startup, (render_nest, spawn_queen, spawn_food_indicators))
-            .add_systems(Update, toggle_view)
-            .add_systems(OnEnter(GameView::Underground), enter_underground)
-            .add_systems(OnExit(GameView::Underground), exit_underground)
+            // Map entities created in PreStartup so Startup systems can query them.
+            .add_systems(PreStartup, setup_maps)
+            .add_systems(
+                Startup,
+                (render_nest, spawn_queen, spawn_food_indicators).after(setup_maps),
+            )
             .add_systems(
                 Update,
                 (
+                    cycle_map_view,
+                    sync_map_visibility,
                     queen_egg_laying,
                     brood_development,
                     update_colony_stats,
                     update_food_indicators,
                 ),
-            )
-;
+            );
     }
 }
 
-fn render_nest(mut commands: Commands, grid: Res<NestGrid>) {
+// ── Map entity setup ──────────────────────────────────────────────────
+
+/// Spawns surface and player-nest map entities, portals between them,
+/// and inserts `ActiveMap`, `MapRegistry`, and `SavedCameraStates`.
+/// Runs in PreStartup so all Startup systems can query the map entities.
+fn setup_maps(mut commands: Commands, config: Res<SimConfig>) {
+    // Surface map — no grid/pheromone components needed.
+    let surface = commands.spawn((MapMarker, MapKind::Surface)).id();
+
+    // Player nest map — carries all per-nest data.
+    let mut nest_grid = NestGrid::default();
+    let mut phero_grid = NestPheromoneGrid::default();
+    phero_grid.seed_from_grid(&nest_grid);
+
+    let player_nest = commands.spawn((
+        MapMarker,
+        MapKind::Nest { colony_id: 0 },
+        nest_grid,
+        phero_grid,
+        NestPathCache::default(),
+        ColonyFood::default(),
+        BehaviorSliders::default(),
+        PlayerDigZones::default(),
+    )).id();
+
+    // Portal pair: surface nest entrance ↔ underground entrance cell.
+    // Surface position = SimConfig.nest_position.
+    // Underground position = top of the entrance tunnel (column cx, first passable row).
+    let cx = NEST_WIDTH / 2;
+    let underground_entrance = nest_grid_to_world(cx, 0);
+    spawn_portal_pair(
+        &mut commands,
+        surface,
+        config.nest_position,
+        player_nest,
+        underground_entrance,
+        Some(0), // only player colony (id=0)
+    );
+
+    commands.insert_resource(ActiveMap { entity: surface, kind: MapKind::Surface });
+    commands.insert_resource(MapRegistry {
+        surface,
+        player_nest,
+        maps: vec![surface, player_nest],
+    });
+    commands.insert_resource(SavedCameraStates::default());
+}
+
+// ── Startup rendering ────────────────────────────────────────────────
+
+fn render_nest(
+    mut commands: Commands,
+    registry: Res<MapRegistry>,
+    map_query: Query<&NestGrid, With<MapMarker>>,
+) {
+    let Ok(grid) = map_query.get(registry.player_nest) else { return };
+
     for y in 0..grid.height {
         for x in 0..grid.width {
             let cell = grid.get(x, y);
@@ -85,13 +130,13 @@ fn render_nest(mut commands: Commands, grid: Res<NestGrid>) {
                 Transform::from_xyz(w.x, w.y, 0.0),
                 Visibility::Hidden,
                 NestTile { grid_x: x, grid_y: y },
-                NestViewEntity,
+                MapId(registry.player_nest),
             ));
         }
     }
 }
 
-fn spawn_queen(mut commands: Commands) {
+fn spawn_queen(mut commands: Commands, registry: Res<MapRegistry>) {
     let cx = NEST_WIDTH / 2;
     let queen_center = nest_grid_to_world(cx, 16);
 
@@ -104,121 +149,126 @@ fn spawn_queen(mut commands: Commands) {
         Transform::from_xyz(queen_center.x, queen_center.y, 3.0),
         Visibility::Hidden,
         Queen,
-        NestViewEntity,
+        MapId(registry.player_nest),
         Health { current: 100.0, max: 100.0 },
     ));
 }
 
-fn spawn_food_indicators(mut commands: Commands) {
-    let cx = NEST_WIDTH / 2;
-    let capacity = 12;
-    let mut idx = 0;
+fn spawn_food_indicators(
+    mut commands: Commands,
+    registry: Res<MapRegistry>,
+    map_query: Query<&NestGrid, With<MapMarker>>,
+) {
+    let Ok(grid) = map_query.get(registry.player_nest) else { return };
+    let food_cells = find_chamber_cells(grid, ChamberKind::FoodStorage);
+    let capacity = food_cells.len().min(12);
 
-    for gy in 5..8 {
-        for gx in (cx - 5)..(cx - 1) {
-            if idx >= capacity {
-                break;
-            }
-            let pos = nest_grid_to_world(gx, gy);
+    for (idx, &(gx, gy)) in food_cells.iter().take(capacity).enumerate() {
+        let pos = nest_grid_to_world(gx, gy);
 
-            commands.spawn((
-                Sprite {
-                    color: Color::srgba(0.6, 0.8, 0.2, 0.0),
-                    custom_size: Some(Vec2::splat(NEST_CELL_SIZE * 0.6)),
-                    ..default()
-                },
-                Transform::from_xyz(pos.x, pos.y, 1.5),
-                Visibility::Hidden,
-                NestViewEntity,
-                FoodStorageIndicator { index: idx },
-            ));
-            idx += 1;
-        }
+        commands.spawn((
+            Sprite {
+                color: Color::srgba(0.6, 0.8, 0.2, 0.0),
+                custom_size: Some(Vec2::splat(NEST_CELL_SIZE * 0.6)),
+                ..default()
+            },
+            Transform::from_xyz(pos.x, pos.y, 1.5),
+            Visibility::Hidden,
+            MapId(registry.player_nest),
+            FoodStorageIndicator { index: idx },
+        ));
     }
 }
 
-fn collect_passable_cells(grid: &NestGrid) -> Vec<(usize, usize)> {
-    let mut cells = Vec::new();
-    for y in 0..grid.height {
-        for x in 0..grid.width {
-            let cell = grid.get(x, y);
-            if matches!(cell, CellType::Tunnel | CellType::Chamber(_)) {
-                cells.push((x, y));
-            }
-        }
-    }
-    cells
-}
+// ── View cycling ─────────────────────────────────────────────────────
 
-fn toggle_view(
+/// Tab cycles through all maps in `MapRegistry.maps`, saving/restoring camera.
+fn cycle_map_view(
     input: Res<ButtonInput<KeyCode>>,
-    current: Res<State<GameView>>,
-    mut next: ResMut<NextState<GameView>>,
+    mut active: ResMut<ActiveMap>,
+    registry: Res<MapRegistry>,
+    map_kind_query: Query<&MapKind, With<MapMarker>>,
+    mut saved: ResMut<SavedCameraStates>,
+    mut camera_query: Query<(&mut Transform, &mut OrthographicProjection), With<MainCamera>>,
+    config: Res<SimConfig>,
 ) {
-    if input.just_pressed(KeyCode::Tab) {
-        match current.get() {
-            GameView::Surface => next.set(GameView::Underground),
-            GameView::Underground => next.set(GameView::Surface),
+    if !input.just_pressed(KeyCode::Tab) {
+        return;
+    }
+    let Ok((mut cam_tf, mut proj)) = camera_query.get_single_mut() else { return };
+
+    // Save current camera state for outgoing map.
+    saved.0.insert(active.entity, SavedCamera {
+        position: cam_tf.translation.truncate(),
+        scale: proj.scale,
+    });
+
+    // Advance to next map.
+    let current_idx = registry.maps.iter().position(|&m| m == active.entity).unwrap_or(0);
+    let next_idx = (current_idx + 1) % registry.maps.len();
+    let next_entity = registry.maps[next_idx];
+    let next_kind = map_kind_query.get(next_entity).copied().unwrap_or(MapKind::Surface);
+
+    // Restore camera for incoming map, or use defaults.
+    if let Some(cam) = saved.0.get(&next_entity) {
+        cam_tf.translation.x = cam.position.x;
+        cam_tf.translation.y = cam.position.y;
+        proj.scale = cam.scale;
+    } else {
+        match next_kind {
+            MapKind::Surface => {
+                cam_tf.translation.x = config.world_width / 2.0;
+                cam_tf.translation.y = config.world_height / 2.0;
+                proj.scale = 1.0;
+            }
+            MapKind::Nest { .. } | MapKind::SpecialZone { .. } => {
+                cam_tf.translation.x = 0.0;
+                cam_tf.translation.y = 0.0;
+                proj.scale = NEST_CAMERA_SCALE;
+            }
         }
     }
+
+    active.entity = next_entity;
+    active.kind = next_kind;
 }
 
-fn enter_underground(
-    mut saved: ResMut<SavedSurfaceCamera>,
-    mut camera_query: Query<(&mut Transform, &mut OrthographicProjection), With<crate::plugins::camera::MainCamera>>,
-    mut nest_q: Query<&mut Visibility, With<NestViewEntity>>,
-    mut neutral_q: Query<&mut Visibility, (Without<NestViewEntity>, Without<crate::plugins::camera::MainCamera>, Without<Node>)>,
+/// Show entities whose MapId matches the active map; hide all others.
+/// Runs every frame but early-exits when nothing changed.
+fn sync_map_visibility(
+    active: Res<ActiveMap>,
+    mut query: Query<(&MapId, &mut Visibility)>,
 ) {
-    if let Ok((mut cam_tf, mut proj)) = camera_query.get_single_mut() {
-        saved.position = cam_tf.translation.truncate();
-        saved.scale = proj.scale;
-        cam_tf.translation.x = 0.0;
-        cam_tf.translation.y = 0.0;
-        proj.scale = 0.7;
+    if !active.is_changed() {
+        return;
     }
-
-    for mut vis in &mut nest_q {
-        *vis = Visibility::Visible;
-    }
-    for mut vis in &mut neutral_q {
-        *vis = Visibility::Hidden;
+    for (map_id, mut vis) in &mut query {
+        *vis = if map_id.0 == active.entity {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
     }
 }
 
-fn exit_underground(
-    saved: Res<SavedSurfaceCamera>,
-    mut camera_query: Query<(&mut Transform, &mut OrthographicProjection), With<crate::plugins::camera::MainCamera>>,
-    mut nest_q: Query<&mut Visibility, With<NestViewEntity>>,
-    mut neutral_q: Query<&mut Visibility, (Without<NestViewEntity>, Without<crate::plugins::camera::MainCamera>, Without<Node>)>,
-) {
-    if let Ok((mut cam_tf, mut proj)) = camera_query.get_single_mut() {
-        cam_tf.translation.x = saved.position.x;
-        cam_tf.translation.y = saved.position.y;
-        proj.scale = saved.scale;
-    }
-
-    for mut vis in &mut nest_q {
-        *vis = Visibility::Hidden;
-    }
-    for mut vis in &mut neutral_q {
-        *vis = Visibility::Inherited;
-    }
-}
+// ── Nest simulation ──────────────────────────────────────────────────
 
 fn queen_egg_laying(
     clock: Res<SimClock>,
     time: Res<Time>,
+    registry: Res<MapRegistry>,
     mut commands: Commands,
-    mut colony_food: ResMut<ColonyFood>,
-    queen_query: Query<Entity, With<Queen>>,
+    mut food_query: Query<&mut ColonyFood, With<MapMarker>>,
+    map_grid_query: Query<&NestGrid, With<MapMarker>>,
+    queen_query: Query<(), With<Queen>>,
     mut egg_timer: Local<f32>,
 ) {
-    if clock.speed == SimSpeed::Paused {
+    if clock.speed == SimSpeed::Paused || queen_query.is_empty() {
         return;
     }
-    if queen_query.is_empty() {
-        return;
-    }
+
+    let Ok(mut colony_food) = food_query.get_mut(registry.player_nest) else { return };
+    let Ok(grid) = map_grid_query.get(registry.player_nest) else { return };
 
     let dt = time.delta_secs() * clock.speed.multiplier();
     *egg_timer += dt;
@@ -228,12 +278,18 @@ fn queen_egg_laying(
         colony_food.stored -= QUEEN_FOOD_COST;
 
         let mut rng = rand::thread_rng();
-        let cx = NEST_WIDTH / 2;
-        let gx = rng.gen_range((cx + 2)..(cx + 7));
-        let gy = rng.gen_range(8..12);
+        let queen_cells = find_chamber_cells(grid, ChamberKind::Queen);
+        if queen_cells.is_empty() {
+            return;
+        }
+        let &(gx, gy) = &queen_cells[rng.gen_range(0..queen_cells.len())];
         let pos = nest_grid_to_world(gx, gy);
-        let jitter = Vec2::new(rng.gen_range(-5.0..5.0), rng.gen_range(-5.0..5.0));
+        let jitter = Vec2::new(
+            rng.gen_range(-NEST_CELL_SIZE * 0.35..NEST_CELL_SIZE * 0.35),
+            rng.gen_range(-NEST_CELL_SIZE * 0.35..NEST_CELL_SIZE * 0.35),
+        );
 
+        // Eggs always start hidden; sync_map_visibility will show them if nest is active.
         commands.spawn((
             Sprite {
                 color: Color::srgb(0.95, 0.95, 0.85),
@@ -243,7 +299,7 @@ fn queen_egg_laying(
             Transform::from_xyz(pos.x + jitter.x, pos.y + jitter.y, 2.5),
             Visibility::Hidden,
             Brood::new_egg(),
-            NestViewEntity,
+            MapId(registry.player_nest),
         ));
     }
 }
@@ -253,7 +309,7 @@ fn brood_development(
     time: Res<Time>,
     config: Res<SimConfig>,
     caste_ratios: Res<CasteRatios>,
-    view: Res<State<GameView>>,
+    registry: Res<MapRegistry>,
     mut commands: Commands,
     mut brood_query: Query<(Entity, &mut Brood, &mut Sprite)>,
 ) {
@@ -309,12 +365,6 @@ fn brood_development(
                     let offset_x = rng.gen_range(-15.0..15.0);
                     let offset_y = rng.gen_range(-15.0..15.0);
 
-                    let vis = if *view.get() == GameView::Underground {
-                        Visibility::Hidden
-                    } else {
-                        Visibility::Inherited
-                    };
-
                     commands.spawn((
                         Sprite {
                             color,
@@ -322,18 +372,15 @@ fn brood_development(
                             ..default()
                         },
                         Transform::from_xyz(nest.x + offset_x, nest.y + offset_y, 2.0),
-                        vis,
-                        Ant {
-                            caste,
-                            state,
-                            age: 0.0,
-                            hunger: 0.0,
-                        },
+                        // New ants hatch onto the surface; hidden until sync_map_visibility.
+                        Visibility::Hidden,
+                        Ant { caste, state, age: 0.0, hunger: 0.0 },
                         Movement::with_random_direction(speed, &mut rng),
                         health,
                         ColonyMember { colony_id: 0 },
                         PositionHistory::default(),
                         TrailSense::default(),
+                        MapId(registry.surface),
                     ));
                 }
             }
@@ -372,9 +419,11 @@ fn update_colony_stats(
 }
 
 fn update_food_indicators(
-    colony_food: Res<ColonyFood>,
+    registry: Res<MapRegistry>,
+    food_query: Query<&ColonyFood, With<MapMarker>>,
     mut query: Query<(&FoodStorageIndicator, &mut Sprite)>,
 ) {
+    let Ok(colony_food) = food_query.get(registry.player_nest) else { return };
     let food = colony_food.stored;
     let food_per_slot = 5.0;
 
@@ -389,4 +438,18 @@ fn update_food_indicators(
             sprite.color = Color::srgba(0.55, 0.75, 0.15, 0.0);
         }
     }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────
+
+fn find_chamber_cells(grid: &NestGrid, kind: ChamberKind) -> Vec<(usize, usize)> {
+    let mut cells = Vec::new();
+    for y in 0..grid.height {
+        for x in 0..grid.width {
+            if grid.get(x, y) == CellType::Chamber(kind) {
+                cells.push((x, y));
+            }
+        }
+    }
+    cells
 }

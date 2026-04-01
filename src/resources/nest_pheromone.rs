@@ -64,7 +64,7 @@ impl Default for NestPheromoneConfig {
 }
 
 /// Grid storing nest pheromone data. Sized to match NestGrid.
-#[derive(Resource)]
+#[derive(Component)]
 pub struct NestPheromoneGrid {
     pub width: usize,
     pub height: usize,

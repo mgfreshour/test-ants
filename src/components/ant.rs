@@ -113,11 +113,6 @@ pub struct PlayerControlled;
 #[derive(Component)]
 pub struct Follower;
 
-/// Marker for ants currently inside the underground nest.
-/// When present, the ant uses nest utility AI instead of surface FSM.
-#[derive(Component)]
-pub struct Underground;
-
 /// What trail, if any, this ant is currently following.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TrailSense {

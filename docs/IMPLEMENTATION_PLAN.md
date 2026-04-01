@@ -6,22 +6,24 @@
 
 ## Overview
 
-13 two-week sprints. Each sprint produces a runnable build with visible new functionality. The plan front-loads core simulation systems (pheromones, ant AI, rendering) so that every subsequent sprint layers on top of a working, watchable ant colony. Sprints 5–7 (formerly a single "Sprint 4.5") build the underground nest into a real simulated space across three incremental layers: pheromones & pathfinding infrastructure, then ant AI, then stigmergic digging & collision.
+15 two-week sprints. Each sprint produces a runnable build with visible new functionality. The plan front-loads core simulation systems (pheromones, ant AI, rendering) so that every subsequent sprint layers on top of a working, watchable ant colony. Sprints 5–7 build the underground nest into a real simulated space across three incremental layers. Sprints 10–11 add a proper `bevy_egui` UI layer so players can manage their colony without memorizing keyboard shortcuts.
 
 ```
-Sprint  1   ██░░░░░░░░░░░░░░░░░░░░░░░░  Wandering Ants
-Sprint  2   ████░░░░░░░░░░░░░░░░░░░░░░  Pheromone Trails
-Sprint  3   ██████░░░░░░░░░░░░░░░░░░░░  Foraging Loop
-Sprint  4   ████████░░░░░░░░░░░░░░░░░░  Colony & Nest
-Sprint  5   ██████████░░░░░░░░░░░░░░░░  Nest Pheromones & Pathfinding
-Sprint  6   ████████████░░░░░░░░░░░░░░  Nest Ant AI
-Sprint  7   ██████████████░░░░░░░░░░░░  Stigmergic Digging & Collision
-Sprint  8   ████████████████░░░░░░░░░░  Player Control
-Sprint  9   ██████████████████░░░░░░░░  Combat & Enemies
-Sprint 10   ████████████████████░░░░░░  Environment & Hazards
-Sprint 11   ██████████████████████░░░░  Quick Game Complete
-Sprint 12   ████████████████████████░░  Campaign Mode
-Sprint 13   ██████████████████████████  Polish & Sandbox
+Sprint  1   ██░░░░░░░░░░░░░░░░░░░░░░░░░░░░  Wandering Ants
+Sprint  2   ████░░░░░░░░░░░░░░░░░░░░░░░░░░  Pheromone Trails
+Sprint  3   ██████░░░░░░░░░░░░░░░░░░░░░░░░  Foraging Loop
+Sprint  4   ████████░░░░░░░░░░░░░░░░░░░░░░  Colony & Nest
+Sprint  5   ██████████░░░░░░░░░░░░░░░░░░░░  Nest Pheromones & Pathfinding
+Sprint  6   ████████████░░░░░░░░░░░░░░░░░░  Nest Ant AI
+Sprint  7   ██████████████░░░░░░░░░░░░░░░░  Stigmergic Digging & Collision
+Sprint  8   ████████████████░░░░░░░░░░░░░░  Player Control
+Sprint  9   ██████████████████░░░░░░░░░░░░  Combat & Enemies
+Sprint 10   ████████████████████░░░░░░░░░░  Colony Management UI (bevy_egui)
+Sprint 11   ██████████████████████░░░░░░░░  Player HUD & Action Bar
+Sprint 12   ████████████████████████░░░░░░  Environment & Hazards
+Sprint 13   ██████████████████████████░░░░  Quick Game Complete
+Sprint 14   ████████████████████████████░░  Campaign Mode
+Sprint 15   ██████████████████████████████  Polish & Sandbox
 ```
 
 ---
@@ -311,9 +313,11 @@ The player can directly control one ant (yellow highlight), pick up food, lay ph
 - [x] Picking up and dropping items works
 - [x] Shift+move deposits visible trail pheromone that AI ants follow
 - [x] R recruits nearby ants, T dismisses them
-- [x] Tab exchanges to a different ant
+- [x] X exchanges to a different ant
 - [x] Camera follow mode tracks player ant smoothly
-- [x] Player HUD shows HP, hunger, carried item, follower count
+- [ ] Player HUD shows HP, hunger, carried item, follower count
+- [x] Player attack (Space key) — combat.rs:298
+- [x] Regurgitate food to adjacent nestmate (F key) + hunger system
 
 ---
 
@@ -347,12 +351,92 @@ A rival red colony exists on the map. Red and black ants fight on contact. Spide
 - [x] Damage, HP, death all work correctly
 - [x] Alarm pheromone recruits defenders to combat zones
 - [x] Spider kills lone ants, can be killed by groups
-- [x] Antlion traps work
+- [ ] Antlion traps work
 - [x] Killing enemy queen triggers victory; losing yours triggers defeat
+- [ ] Red colony AI has strategy layer (aggression curve, raid timing)
+- [ ] Combat visual effects (hit flash, damage numbers)
 
 ---
 
-## Sprint 10: Environment & Hazards (Weeks 19-20)
+## Sprint 10: Colony Management UI (Weeks 19-20)
+
+### Goal
+Replace the text-based colony panel and keyboard-only controls with a proper `bevy_egui` UI. Players get a collapsible colony management panel with real sliders for job distribution, caste birthrates, and aggression. The panel adapts to the current view (surface vs. underground) and exposes all colony tuning without memorizing key bindings. Keyboard shortcuts still work as hotkeys for power users.
+
+### Tasks
+
+| # | Task | Components / Systems | Est |
+|---|---|---|---|
+| 10.1 | Add `bevy_egui` dependency to `Cargo.toml`. Create `UiPlugin` that initializes egui context and consumes input when UI is focused (prevents WASD moving the ant while typing in a slider). | `Cargo.toml`, `plugins/egui_ui.rs` | 3h |
+| 10.2 | Colony Management Panel — collapsible left-side panel with sections: **Job Distribution** (forage/nurse/dig/defend sliders, constrained to sum to 1.0), **Caste Birthrates** (worker/soldier/drone sliders, constrained to sum to 1.0), **Aggression** (patrol radius, defender response threshold). Reads/writes `BehaviorSliders`, `CasteRatios`, new `AggressionSettings` resource. | `plugins/egui_ui.rs`, `resources/colony.rs` | 8h |
+| 10.3 | Colony Stats section in the panel — population breakdown (workers/soldiers/drones), brood counts (eggs/larvae/pupae), food stored, ants underground vs. surface. Read-only display from `ColonyStats`, `ColonyFood`, underground ant count. | `plugins/egui_ui.rs` | 3h |
+| 10.4 | Sim Controls toolbar — top bar with play/pause button, speed selector (1x/2x/4x/8x), elapsed time display. Replaces Space/Period keyboard cycling (hotkeys still work). | `plugins/egui_ui.rs` | 3h |
+| 10.5 | View Toggle — surface/underground button in toolbar with current view indicator. Replaces Tab-only switching (Tab still works as hotkey). | `plugins/egui_ui.rs` | 2h |
+| 10.6 | Overlay Controls — checkboxes/dropdown for pheromone overlay mode (Off/All/Home/Food/Alarm/Trail on surface; Off/Queen/Brood/Construction on underground). Replaces H/N key cycling. | `plugins/egui_ui.rs` | 3h |
+| 10.7 | Nest View Controls — when underground, show dig zone toggle (click-to-designate mode), pheromone overlay type selector, path debug toggle. Replaces N/P keys. | `plugins/egui_ui.rs` | 3h |
+| 10.8 | `AggressionSettings` resource — patrol radius, alarm response threshold, defender ratio within defend-allocated ants. Wired into `ant_ai.rs` alarm response and `combat.rs` detection range. | `resources/colony.rs`, `plugins/ant_ai.rs`, `plugins/combat.rs` | 4h |
+| 10.9 | Slider constraint system — job distribution sliders auto-normalize to sum to 1.0 (adjusting others proportionally when one moves). Same for caste birthrate sliders. | `plugins/egui_ui.rs` | 3h |
+| 10.10 | Remove old text-based colony panel (`colony_panel.rs`) and keyboard-only slider controls (1/2/3/4 keys). Migrate all functionality to egui. Keep keyboard shortcuts as hotkeys wired through egui. | `ui/colony_panel.rs` (remove), `plugins/egui_ui.rs` | 2h |
+| 10.11 | Tooltip system — hover any slider or stat for a brief explanation (e.g., "Forage: % of surface ants dedicated to finding food"). | `plugins/egui_ui.rs` | 2h |
+
+### Demo
+> Open the game. A collapsible panel on the left shows colony stats at a glance: 47 workers, 8 soldiers, 12 brood, 35 food stored. Below that, four job distribution sliders — drag "Nurse" up and "Forage" auto-adjusts down. A "Caste Birthrates" section lets you boost soldier production to 40%. An "Aggression" section widens the patrol radius. Top toolbar has play/pause, speed selector showing "2x", and a "Surface/Underground" toggle button. Switch to underground view — the panel updates to show nest-specific stats and a "Dig Zones" toggle. Hover over any slider for a tooltip explaining what it does. Press Tab — view switches (hotkey still works). The panel is unobtrusive and can be collapsed to just an icon.
+
+### Acceptance Criteria
+- [ ] `bevy_egui` integrated and rendering panels
+- [ ] Job distribution sliders read/write `BehaviorSliders`, auto-normalize to 1.0
+- [ ] Caste birthrate sliders read/write `CasteRatios`, auto-normalize to 1.0
+- [ ] Aggression settings control patrol/alarm behavior
+- [ ] Colony stats display matches actual simulation state
+- [ ] Sim speed and pause controllable via UI buttons
+- [ ] View toggle works from UI (Tab hotkey preserved)
+- [ ] Overlay controls replace keyboard cycling
+- [ ] Panel adapts content to current view (surface vs. underground)
+- [ ] Tooltips on all interactive elements
+- [ ] Old text-based colony panel removed
+- [ ] UI does not consume game input when not focused (WASD still moves ant)
+
+---
+
+## Sprint 11: Player HUD & Action Bar (Weeks 21-22)
+
+### Goal
+The player-controlled ant gets a proper HUD with health bar, carried item display, and clickable action buttons. Modern players can play entirely with mouse + minimal keys. The action bar provides all player interactions (pick up, drop, recruit, dismiss, swap, lay trail) as buttons with hotkey labels. Context-sensitive: buttons gray out when unavailable. This replaces the bottom text line of keyboard hints.
+
+### Tasks
+
+| # | Task | Components / Systems | Est |
+|---|---|---|---|
+| 11.1 | Player Info HUD — bottom-center bar showing: ant sprite/caste icon, HP bar (green→red), hunger bar, carried item icon with amount, follower count badge. Updates live from `PlayerControlled` entity queries. | `plugins/egui_ui.rs` | 5h |
+| 11.2 | Action Bar — row of icon buttons: Pick Up (E), Drop (Q), Lay Trail (Shift), Recruit (R), Dismiss (T), Swap Ant (X), Attack (Space). Each shows hotkey label. Clicking triggers the same action as the hotkey. | `plugins/egui_ui.rs`, `plugins/player.rs` | 6h |
+| 11.3 | Context-sensitive button states — Pick Up grayed when no food nearby or already carrying. Drop grayed when not carrying. Recruit grayed when no ants nearby. Attack grayed when no enemies adjacent. Trail button toggles (highlighted when active). | `plugins/egui_ui.rs` | 4h |
+| 11.4 | Action event system — UI buttons emit `PlayerAction` events that the player plugin consumes, unifying keyboard and mouse input paths. Refactor `player.rs` to read events instead of raw `ButtonInput<KeyCode>` for actions. | `plugins/player.rs`, `plugins/egui_ui.rs` | 5h |
+| 11.5 | Minimap widget — small corner overlay (egui `Window`) showing world extent, ant density as colored dots (black=friendly, red=enemy), food sources as green dots, nest entrance marker. Click to pan camera. | `plugins/egui_ui.rs` | 5h |
+| 11.6 | Notification toast system — brief egui toasts for game events: "Rain starting!", "Enemy spotted!", "Queen laid an egg", "Larva hatched". Auto-dismiss after 3 seconds. Queue up to 3 visible. | `plugins/egui_ui.rs` | 3h |
+| 11.7 | Remove old text-based HUD (`ui/hud.rs` text blob). Replace with the egui-based HUD components. Keep FPS counter as a small egui label in the corner. | `ui/hud.rs` (simplify), `plugins/egui_ui.rs` | 3h |
+| 11.8 | Keyboard shortcut reference — `?` key or button opens a small overlay listing all hotkeys grouped by category (movement, actions, camera, colony). Dismissable. | `plugins/egui_ui.rs` | 2h |
+| 11.9 | Panel toggle hotkey — `` ` `` (backtick) toggles the colony management panel visibility. `Escape` closes any open panel/overlay. | `plugins/egui_ui.rs` | 1h |
+
+### Demo
+> Player ant has a sleek bottom bar: green HP bar, "Carrying: 5.0 food" with icon, "3 followers" badge. Below it, action buttons: [Pick Up (E)] is grayed (already carrying), [Drop (Q)] is lit, [Trail (Shift)] glows when held, [Recruit (R)] shows a radius preview on hover, [Swap (X)] [Attack (Space)]. Click "Drop" near the nest — food deposited, button grays out, "Pick Up" lights up. Corner minimap shows ant clusters and a red colony dot across the map. A toast slides in: "Enemy ants spotted near food source!" then fades. Press `?` — hotkey reference card appears. Press backtick — colony panel slides shut for an uncluttered view.
+
+### Acceptance Criteria
+- [ ] Player HP bar, hunger, carried item, follower count displayed visually
+- [ ] All player actions available as clickable buttons with hotkey labels
+- [ ] Buttons context-sensitive (grayed when unavailable)
+- [ ] Mouse clicks on action buttons trigger same behavior as hotkeys
+- [ ] Minimap shows world overview with clickable camera panning
+- [ ] Notification toasts appear for key game events
+- [ ] Old text HUD replaced with egui components
+- [ ] `?` opens hotkey reference overlay
+- [ ] Panel toggle with backtick, Escape closes overlays
+- [ ] UI does not interfere with game input when panels not focused
+
+---
+
+## Sprint 12: Environment & Hazards (Weeks 23-24)
+
+> *Formerly Sprint 10.*
 
 ### Goal
 Rain washes away pheromone trails. Human footsteps crush ants. Lawnmowers sweep across the surface. Day/night cycle affects ant behavior. The world feels dynamic and dangerous.
@@ -361,31 +445,31 @@ Rain washes away pheromone trails. Human footsteps crush ants. Lawnmowers sweep 
 
 | # | Task | Components / Systems | Est |
 |---|---|---|---|
-| 10.1 | Rain event system — periodic rain (random interval 2-5 min). During rain: pheromone evaporation rate 10x, visual rain particle overlay, puddles on terrain. | `plugins/environment.rs` | 5h |
-| 10.2 | Nest flooding — heavy rain causes water level to rise in lowest nest tunnels. Ants in flooded areas take damage. Player incentive to not dig too deep. | `plugins/environment.rs`, `plugins/nest.rs` | 4h |
-| 10.3 | Human footstep event — random position, 3-tile radius area damage (999). Shadow warning 1 second before impact. | `plugins/environment.rs` | 3h |
-| 10.4 | Lawnmower event — horizontal sweep from left edge to right at a random y-position. Kills everything in path. Visual/audio warning. | `plugins/environment.rs` | 4h |
-| 10.5 | Pesticide spray — lingering poison zone (10x10 area). Ants entering take damage over time. Persists for 30 seconds. Visual green haze. | `plugins/environment.rs` | 3h |
-| 10.6 | Day/night cycle — 3-minute cycle. Ants forage more during day, return to nest at night. Subtle lighting shift on terrain. | `plugins/environment.rs` | 4h |
-| 10.7 | Weather visual effects — rain particles, darkened sky, puddle sprites, footstep shadow, mower sprite. | rendering | 5h |
-| 10.8 | Sound effects (first pass) — ambient outdoor sounds, rain, combat clicks, food pickup chime, alarm tone. Use `bevy_audio`. | audio | 5h |
-| 10.9 | Event notification system — brief text pop-ups: "Rain starting!", "Watch out — footstep!", "Lawnmower approaching!" | `ui/notifications.rs` | 3h |
+| 12.1 | Rain event system — periodic rain (random interval 2-5 min). During rain: pheromone evaporation rate 10x. Minimal visual indicator (tinted screen overlay). | `plugins/environment.rs` | 4h |
+| 12.2 | Nest flooding — heavy rain causes water level to rise in lowest nest tunnels. Ants in flooded areas take damage. Player incentive to not dig too deep. | `plugins/environment.rs`, `plugins/nest.rs` | 4h |
+| 12.3 | Human footstep event — random position, 3-tile radius area damage (999). Brief shadow warning before impact. | `plugins/environment.rs` | 3h |
+| 12.4 | Lawnmower event — horizontal sweep from left edge to right at a random y-position. Kills everything in path. Brief warning indicator. | `plugins/environment.rs` | 3h |
+| 12.5 | Pesticide spray — lingering poison zone (10x10 area). Ants entering take damage over time. Persists for 30 seconds. Tinted ground marker. | `plugins/environment.rs` | 3h |
+| 12.6 | Day/night cycle — 3-minute cycle. Ants forage more during day, return to nest at night. Behavioral changes only (visual polish deferred to Sprint 15). | `plugins/environment.rs` | 3h |
+| 12.7 | Event notification system — egui toasts for hazard events: "Rain starting!", "Watch out — footstep!", "Lawnmower approaching!" (reuses Sprint 11 toast system). | `plugins/egui_ui.rs` | 2h |
 
 ### Demo
-> Colony is foraging happily. Sky darkens — rain starts. Pheromone overlay fades rapidly. Ants lose their trails and scatter. Rain stops, ants rebuild trails. Later, a shadow falls — STOMP. 8 ants crushed. A lawnmower warning appears — it sweeps across, devastating a foraging line. Green haze appears near the food source — pesticide zone, ants walking through take damage. Night falls, ants return to nest. Day breaks, they emerge again.
+> Colony is foraging happily. Rain starts — pheromone overlay fades rapidly, ants lose their trails and scatter. Rain stops, ants rebuild trails. A shadow appears — STOMP. 8 ants crushed. A lawnmower warning toast appears — it sweeps across, devastating a foraging line. Tinted ground marks a pesticide zone, ants walking through take damage. Night falls, ants return to nest. Day breaks, they emerge again.
 
 ### Acceptance Criteria
-- [x] Rain visibly accelerates pheromone decay, ants lose trails
-- [x] Flooding damages ants in deep tunnels
-- [x] Footstep kills ants in area with warning shadow
-- [x] Lawnmower sweeps with visual warning
-- [x] Pesticide creates damaging zone
-- [x] Day/night cycle affects ant activity
-- [x] At least 4 sound effects playing correctly
+- [ ] Rain accelerates pheromone decay, ants lose trails
+- [ ] Flooding damages ants in deep tunnels
+- [ ] Footstep kills ants in area with warning
+- [ ] Lawnmower sweeps and kills in path
+- [ ] Pesticide creates lingering damage zone
+- [ ] Day/night cycle affects ant behavior
+- [ ] Hazard event notifications via egui toasts
 
 ---
 
-## Sprint 11: Quick Game Complete (Weeks 21-22)
+## Sprint 13: Quick Game Complete (Weeks 25-26)
+
+> *Formerly Sprint 11.*
 
 ### Goal
 A fully playable Quick Game mode from main menu to victory/defeat screen. Balanced, fun, 10-15 minute play sessions. This is the first "real game" milestone.
@@ -409,17 +493,19 @@ A fully playable Quick Game mode from main menu to victory/defeat screen. Balanc
 > Launch game. Title screen appears. Click "Quick Game". Player spawns as yellow ant. Tutorial hints guide first actions. Forage food, grow colony, clash with red ants, survive hazards. Red colony sends raids. Counter-attack with recruited soldiers. Kill the red queen — victory screen shows stats. Play again or quit to menu.
 
 ### Acceptance Criteria
-- [x] Full game loop: menu → play → win/lose → menu
-- [x] Game is winnable and losable
-- [x] 10-15 minute play session feels complete
-- [x] No crashes or softlocks in 10 consecutive playthroughs
-- [x] Tutorial teaches core controls
-- [x] Minimap provides strategic awareness
-- [x] Red AI provides meaningful challenge
+- [ ] Full game loop: menu → play → win/lose → menu
+- [x] Game is winnable and losable (victory/defeat detection exists)
+- [ ] 10-15 minute play session feels complete
+- [ ] No crashes or softlocks in 10 consecutive playthroughs
+- [ ] Tutorial teaches core controls
+- [ ] Minimap provides strategic awareness
+- [ ] Red AI provides meaningful challenge
 
 ---
 
-## Sprint 12: Campaign Mode (Weeks 23-24)
+## Sprint 14: Campaign Mode (Weeks 27-28)
+
+> *Formerly Sprint 12.*
 
 ### Goal
 Multi-patch campaign where the player colonizes a 4x4 yard grid and a house. Mating flights establish satellite colonies. Difficulty escalates. The game has long-term progression and replayability.
@@ -434,7 +520,7 @@ Multi-patch campaign where the player colonizes a 4x4 yard grid and a house. Mat
 | 12.4 | Patch switching — player can switch active patch from campaign map. Each patch maintains its own simulation state (ants, pheromones, nest). | `plugins/campaign.rs` | 6h |
 | 12.5 | Difficulty scaling — later patches have more red ants, more predators, more hazards. House patches have poison bait, traps, exterminator events. | `plugins/campaign.rs` | 4h |
 | 12.6 | Red colony campaign AI — red colony also expands to adjacent patches. Race for territory. Red AI more aggressive in later patches. | `plugins/ant_ai.rs` | 5h |
-| 12.7 | House interior tileset — indoor tiles (kitchen tile, carpet, wood), indoor food sources (sugar bowl, crumbs under table, pet food). | `assets/`, `plugins/terrain.rs` | 5h |
+| 12.7 | House interior gameplay — distinct indoor hazards (poison bait, traps, exterminator events), indoor food source types (sugar, crumbs, pet food). Visual tileset deferred to Sprint 15. | `plugins/campaign.rs` | 3h |
 | 12.8 | Campaign victory/defeat — win at 70% house + red eliminated. Lose if all queens dead. Stats screen with campaign summary. | `plugins/campaign.rs`, `ui/gameover.rs` | 3h |
 | 12.9 | Campaign save/load — serialize campaign state (patch statuses, colony states) to disk. Resume from main menu. | `plugins/campaign.rs` | 5h |
 
@@ -442,47 +528,57 @@ Multi-patch campaign where the player colonizes a 4x4 yard grid and a house. Mat
 > Start campaign. Map shows 16 yard patches. Enter the starting patch — play a mini Quick Game. Colony grows. Trigger mating flight — choose adjacent patch. Switch to new patch — a fledgling colony with 10 ants. Build it up. Meanwhile, red colony has colonized two patches on their side. Race to claim the house patches. Enter the house — indoor tileset, different food sources, new hazards. Win by dominating the house.
 
 ### Acceptance Criteria
-- [x] Campaign map screen works with 4x4 + house layout
-- [x] Mating flight establishes functional satellite colonies
-- [x] Switching patches preserves simulation state
-- [x] Difficulty clearly escalates across patches
-- [x] House interior plays differently from yard
-- [x] Campaign save/load round-trips correctly
-- [x] Campaign is winnable in ~60-90 minutes
+- [ ] Campaign map screen works with 4x4 + house layout
+- [ ] Mating flight establishes functional satellite colonies
+- [ ] Switching patches preserves simulation state
+- [ ] Difficulty clearly escalates across patches
+- [ ] House interior plays differently from yard
+- [ ] Campaign save/load round-trips correctly
+- [ ] Campaign is winnable in ~60-90 minutes
 
 ---
 
-## Sprint 13: Polish & Sandbox (Weeks 25-26)
+## Sprint 15: Visual Polish, Audio & Sandbox (Weeks 29-30)
+
+> *Formerly Sprint 13. Now also absorbs all visual/audio polish deferred from earlier sprints.*
 
 ### Goal
-Sandbox mode with full environmental controls. Art/audio polish pass. Performance optimization to hit 10,000 ants at 60fps. This is the release-candidate sprint.
+All visual and audio polish consolidated here. Sandbox mode with full environmental controls. Art/audio pass across the entire game. Performance optimization. This is the release-candidate sprint. The game should be fully playable and balanced before this sprint — this sprint makes it *look and sound* good.
 
 ### Tasks
 
 | # | Task | Components / Systems | Est |
 |---|---|---|---|
-| 13.1 | Sandbox mode — spawn from menu. Full controls: spawn food, place walls, paint pheromones, spawn/kill ants, control either colony. | `plugins/sandbox.rs` | 6h |
-| 13.2 | Sandbox parameter panel — expose all simulation constants (evap rate, diffuse rate, ant speed, lifespans, nest humidity, etc.) with live-edit sliders. | `ui/sandbox_panel.rs` | 4h |
-| 13.3 | Data overlays for sandbox — pheromone heat maps (surface + nest), ant density map, population over time graph, foraging efficiency metric. | `ui/overlays.rs` | 5h |
-| 13.4 | Art polish — replace placeholder sprites with proper pixel art. Ant walk animations (6-8 frames). Food sprites. Terrain tiles. UI skinning. | art, `assets/` | 8h |
-| 13.5 | Audio polish — full ambient soundscape (surface/underground). Combat sounds. UI sounds. Dynamic music that responds to colony stress. | audio, `assets/audio/` | 6h |
-| 13.6 | Performance optimization — profile with 10K ants. Optimize pheromone grids (surface + nest, SIMD or compute shader). Reduce AI update frequency. LOD for distant ants. Sprite batching audit. | all systems | 8h |
-| 13.7 | Settings screen — resolution, fullscreen, volume sliders, control rebinding. | `ui/settings.rs` | 4h |
-| 13.8 | Accessibility — colorblind mode for pheromone overlays, adjustable UI scale, key rebinding. | `ui/settings.rs` | 3h |
-| 13.9 | Bug fix buffer — address bugs found in Sprint 11-12 playtesting. | all | 6h |
-| 13.10 | Final QA — full pass on all three modes (Quick, Campaign, Sandbox). Performance benchmarks on min-spec hardware. | QA | 5h |
+| 15.1 | Sandbox mode — spawn from menu. Full controls: spawn food, place walls, paint pheromones, spawn/kill ants, control either colony. | `plugins/sandbox.rs` | 6h |
+| 15.2 | Sandbox parameter panel — expose all simulation constants (evap rate, diffuse rate, ant speed, lifespans, nest humidity, etc.) with live-edit egui sliders. | `plugins/egui_ui.rs` | 4h |
+| 15.3 | Data overlays for sandbox — pheromone heat maps (surface + nest), ant density map, population over time graph, foraging efficiency metric. | `plugins/egui_ui.rs` | 5h |
+| 15.4 | **Art polish** — replace placeholder sprites with proper pixel art. Ant walk animations (6-8 frames). Food sprites. Terrain tiles. UI skinning. | art, `assets/` | 8h |
+| 15.5 | **Audio system** — integrate `bevy_audio`. Ambient outdoor soundscape, underground ambience. Combat clicks, food pickup chime, alarm tone. At least 8 sound effects. | audio, `assets/audio/` | 6h |
+| 15.6 | **Weather visual effects** *(deferred from Sprint 12)* — rain particles, darkened sky, puddle sprites, footstep shadow, mower sprite animation. Layer on top of existing hazard mechanics. | rendering | 5h |
+| 15.7 | **Combat visual effects** *(deferred from Sprint 9)* — hit flash, small damage numbers or shake, death particle burst. | rendering | 4h |
+| 15.8 | **Player visual feedback** *(deferred from Sprint 8)* — ant highlight glow, pheromone deposit particles, recruit radius indicator on R press. | rendering | 4h |
+| 15.9 | **Day/night visual cycle** *(deferred from Sprint 12)* — subtle lighting shift on terrain, darkened sky at night, dawn/dusk color gradients. | rendering | 3h |
+| 15.10 | **Nest excavation feedback** *(deferred from Sprint 7)* — newly excavated cells flash briefly, soil particles visible on hauling ants. | rendering | 2h |
+| 15.11 | **House interior tileset** *(deferred from Sprint 14)* — indoor tiles (kitchen tile, carpet, wood), indoor food sources (sugar bowl, crumbs, pet food). | `assets/`, `plugins/terrain.rs` | 5h |
+| 15.12 | Performance optimization — profile with 10K ants. Optimize pheromone grids (SIMD or compute shader). Reduce AI update frequency. LOD for distant ants. Sprite batching audit. | all systems | 8h |
+| 15.13 | Settings screen — resolution, fullscreen, volume sliders, control rebinding. | `plugins/egui_ui.rs` | 4h |
+| 15.14 | Accessibility — colorblind mode for pheromone overlays, adjustable UI scale, key rebinding. | `plugins/egui_ui.rs` | 3h |
+| 15.15 | Bug fix buffer — address bugs found in Sprint 13-14 playtesting. | all | 6h |
+| 15.16 | Final QA — full pass on all three modes (Quick, Campaign, Sandbox). Performance benchmarks on min-spec hardware. | QA | 5h |
 
 ### Demo
-> Full game showcase. Title screen with three playable modes. Quick Game is polished and balanced. Campaign takes the player from a single patch to house domination. Sandbox lets you create a 10,000-ant mega-colony and watch emergent behavior with live-tunable parameters and data overlays. Art is pixel-perfect, audio is immersive, and it runs at 60fps.
+> Full game showcase. Title screen with three playable modes. Quick Game is polished and balanced. Campaign takes the player from a single patch to house domination. Sandbox lets you create a 10,000-ant mega-colony and watch emergent behavior with live-tunable parameters and data overlays. Art is pixel-perfect, audio is immersive, and it runs at 60fps. Rain has particle effects and darkened sky. Combat has hit flashes and death particles. The player ant glows and shows a recruit radius.
 
 ### Acceptance Criteria
-- [x] Sandbox mode fully functional with all controls
-- [x] All three game modes accessible from main menu
-- [x] Proper pixel art sprites with animations
-- [x] Ambient + contextual audio throughout
-- [x] 10,000 ants at 60fps on target hardware
-- [x] No known crash bugs
-- [x] Settings screen with volume, resolution, colorblind mode
+- [ ] Sandbox mode fully functional with all controls
+- [ ] All three game modes accessible from main menu
+- [ ] Proper pixel art sprites with animations
+- [ ] Ambient + contextual audio throughout (8+ sound effects)
+- [ ] Weather, combat, player, and nest visual effects polished
+- [ ] House interior tileset in campaign
+- [ ] 10,000 ants at 60fps on target hardware
+- [ ] No known crash bugs
+- [ ] Settings screen with volume, resolution, colorblind mode
 
 ---
 
@@ -496,7 +592,7 @@ Sandbox mode with full environmental controls. Art/audio polish pass. Performanc
 | Red AI too easy or too hard | High | Medium | Dedicate balance time in Sprint 8. Expose difficulty slider. |
 | Campaign state management complexity | Medium | Medium | Keep patches isolated (no cross-patch simulation). Serialize minimal state. |
 | Scope creep | High | Medium | Each sprint has a locked scope. Nice-to-haves deferred to post-release. |
-| Art/audio takes longer than estimated | Medium | Low | Placeholder art is fine for all sprints until Sprint 10. Game is playable without polish. |
+| Art/audio takes longer than estimated | Medium | Low | Placeholder art is fine for all sprints until Sprint 15. Game is fully playable without polish. |
 
 ---
 
@@ -516,17 +612,22 @@ Sprint 1 ──► Sprint 2 ──► Sprint 3 ──► Sprint 4 ──┐
   ├───────────────────────────────────────────┘
   │
   ├──► Sprint 8 ──► Sprint 9 ──► Sprint 10 ──► Sprint 11
-  │    (player)     (combat)     (environ.)    (quick game)
+  │    (player)     (combat)     (colony UI     (player HUD
+  │                               bevy_egui)     & action bar)
   │                                                │
-  │                                                ▼
-  │                                     Sprint 12 ──► Sprint 13
-  │                                     (campaign)    (polish)
+  │                  Sprint 12 ◄───────────────────┘
+  │                  (environ.)
+  │                      │
+  │                      ▼
+  │               Sprint 13 ──► Sprint 14 ──► Sprint 15
+  │               (quick game)  (campaign)    (polish)
   │
   └─ Sprints 1-4 build the surface simulation engine.
-     Sprints 5-7 build the nest into a real simulation
-       (pheromones, AI, digging, collision) in three layers.
-     Sprints 8-11 add gameplay on top.
-     Sprints 12-13 add breadth and polish.
+     Sprints 5-7 build the nest into a real simulation.
+     Sprints 8-9 add player control and combat.
+     Sprints 10-11 add a proper bevy_egui UI layer.
+     Sprints 12-14 add gameplay modes and content (mechanics only).
+     Sprint 15 consolidates ALL visual/audio polish + sandbox.
 ```
 
 Each sprint produces a demoable build because they stack vertically — Sprint N always works as a superset of Sprint N-1, never as an isolated branch that needs integration later.

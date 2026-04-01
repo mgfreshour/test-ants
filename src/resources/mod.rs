@@ -1,3 +1,4 @@
+pub mod active_map;
 pub mod colony;
 pub mod nest;
 pub mod nest_pathfinding;

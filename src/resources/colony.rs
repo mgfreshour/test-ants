@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::components::ant::Caste;
 
-#[derive(Resource)]
+#[derive(Component)]
 pub struct BehaviorSliders {
     pub forage: f32,
     pub nurse: f32,

@@ -6,7 +6,7 @@ pub const NEST_WIDTH: usize = 60;
 pub const NEST_HEIGHT: usize = 40;
 pub const NEST_CELL_SIZE: f32 = 16.0;
 
-#[derive(Resource)]
+#[derive(Component)]
 pub struct NestGrid {
     pub width: usize,
     pub height: usize,
@@ -137,7 +137,7 @@ impl NestGrid {
 }
 
 /// Player-designated dig targets. Cells in this set get a utility scoring boost.
-#[derive(Resource, Default)]
+#[derive(Component, Default)]
 pub struct PlayerDigZones {
     pub cells: std::collections::HashSet<(usize, usize)>,
 }

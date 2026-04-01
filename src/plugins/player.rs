@@ -3,12 +3,13 @@ use rand::Rng;
 
 use crate::components::ant::{
     Ant, AntState, CarriedItem, Caste, ColonyMember, Movement, PlayerControlled, PositionHistory,
-    Underground,
 };
+use crate::components::map::{MapId, MapMarker};
 use crate::components::pheromone::PheromoneType;
 use crate::components::terrain::FoodSource;
 use crate::plugins::ant_ai::ColonyFood;
 use crate::plugins::camera::MainCamera;
+use crate::resources::active_map::{MapRegistry, viewing_surface};
 use crate::resources::pheromone::{ColonyPheromones, PheromoneConfig};
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 
@@ -40,7 +41,6 @@ const FOLLOW_DISTANCE: f32 = 30.0;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        use crate::plugins::nest::GameView;
 
         app.init_resource::<PlayerMode>()
             .init_resource::<FollowerCount>()
@@ -59,6 +59,7 @@ impl Plugin for PlayerPlugin {
                     player_movement,
                     player_pickup,
                     player_drop,
+                    player_regurgitate,
                     player_pheromone,
                     player_recruit,
                     player_dismiss,
@@ -67,21 +68,22 @@ impl Plugin for PlayerPlugin {
                     update_player_visual,
                 )
                     .chain()
-                    .run_if(in_state(GameView::Surface)),
+                    .run_if(viewing_surface),
             );
     }
 }
 
 fn designate_player_ant(
     mut commands: Commands,
-    query: Query<(Entity, &ColonyMember), (With<Ant>, Without<Underground>)>,
+    registry: Res<MapRegistry>,
+    query: Query<(Entity, &ColonyMember, &MapId), With<Ant>>,
     existing: Query<Entity, With<PlayerControlled>>,
 ) {
     if !existing.is_empty() {
         return;
     }
-    for (entity, colony) in &query {
-        if colony.colony_id == 0 {
+    for (entity, colony, map_id) in &query {
+        if colony.colony_id == 0 && map_id.0 == registry.surface {
             commands.entity(entity).insert(PlayerControlled);
             break;
         }
@@ -92,7 +94,7 @@ fn toggle_player_mode(
     input: Res<ButtonInput<KeyCode>>,
     mut mode: ResMut<PlayerMode>,
 ) {
-    if input.just_pressed(KeyCode::KeyF) {
+    if input.just_pressed(KeyCode::KeyG) {
         if mode.controlling {
             mode.controlling = false;
             mode.follow_camera = false;
@@ -182,7 +184,8 @@ fn player_drop(
     mode: Res<PlayerMode>,
     mut commands: Commands,
     config: Res<SimConfig>,
-    mut colony_food: ResMut<ColonyFood>,
+    registry: Res<MapRegistry>,
+    mut food_query: Query<&mut ColonyFood, With<MapMarker>>,
     query: Query<(Entity, &Transform, &CarriedItem), With<PlayerControlled>>,
 ) {
     if !mode.controlling || !input.just_pressed(KeyCode::KeyQ) {
@@ -197,9 +200,46 @@ fn player_drop(
     let dist_to_nest = pos.distance(config.nest_position);
 
     if dist_to_nest < 40.0 {
-        colony_food.stored += carried.food_amount;
+        if let Ok(mut food) = food_query.get_mut(registry.player_nest) {
+            food.stored += carried.food_amount;
+        }
     }
     commands.entity(entity).remove::<CarriedItem>();
+}
+
+fn player_regurgitate(
+    input: Res<ButtonInput<KeyCode>>,
+    mode: Res<PlayerMode>,
+    mut commands: Commands,
+    player_query: Query<(Entity, &Transform, &CarriedItem), With<PlayerControlled>>,
+    mut ant_query: Query<(&Transform, &mut Ant), Without<PlayerControlled>>,
+) {
+    if !mode.controlling || !input.just_pressed(KeyCode::KeyF) {
+        return;
+    }
+
+    let Ok((player_entity, player_tf, carried)) = player_query.get_single() else {
+        return;
+    };
+
+    let player_pos = player_tf.translation.truncate();
+
+    // Find nearest friendly ant within range
+    let mut nearest: Option<(f32, Mut<Ant>)> = None;
+    for (tf, ant) in &mut ant_query {
+        let dist = player_pos.distance(tf.translation.truncate());
+        if dist < PICKUP_RANGE {
+            if nearest.is_none() || dist < nearest.as_ref().unwrap().0 {
+                nearest = Some((dist, ant));
+            }
+        }
+    }
+
+    if let Some((_dist, mut target_ant)) = nearest {
+        let relief = (carried.food_amount * 0.1).min(target_ant.hunger);
+        target_ant.hunger = (target_ant.hunger - relief).max(0.0);
+        commands.entity(player_entity).remove::<CarriedItem>();
+    }
 }
 
 fn player_pheromone(
@@ -286,9 +326,10 @@ fn player_dismiss(
 fn exchange_ant(
     input: Res<ButtonInput<KeyCode>>,
     mode: Res<PlayerMode>,
+    registry: Res<MapRegistry>,
     mut commands: Commands,
     player_query: Query<(Entity, &Transform), With<PlayerControlled>>,
-    candidate_query: Query<(Entity, &Transform), (With<Ant>, Without<PlayerControlled>, Without<Underground>)>,
+    candidate_query: Query<(Entity, &Transform, &MapId), (With<Ant>, Without<PlayerControlled>)>,
 ) {
     if !mode.controlling || !input.just_pressed(KeyCode::KeyX) {
         return;
@@ -301,7 +342,11 @@ fn exchange_ant(
     let player_pos = player_tf.translation.truncate();
     let mut nearest: Option<(Entity, f32)> = None;
 
-    for (entity, tf) in &candidate_query {
+    for (entity, tf, map_id) in &candidate_query {
+        // Only swap to surface ants.
+        if map_id.0 != registry.surface {
+            continue;
+        }
         let dist = player_pos.distance(tf.translation.truncate());
         if nearest.is_none() || dist < nearest.unwrap().1 {
             nearest = Some((entity, dist));

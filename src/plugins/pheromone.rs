@@ -32,7 +32,7 @@ impl Default for OverlayState {
 
 impl Plugin for PheromonePlugin {
     fn build(&self, app: &mut App) {
-        use crate::plugins::nest::GameView;
+        use crate::resources::active_map::viewing_surface;
 
         app.init_resource::<PheromoneConfig>()
             .init_resource::<OverlayState>()
@@ -42,7 +42,7 @@ impl Plugin for PheromonePlugin {
                 Update,
                 (toggle_overlay, update_overlay_visuals)
                     .chain()
-                    .run_if(in_state(GameView::Surface)),
+                    .run_if(viewing_surface),
             );
     }
 }

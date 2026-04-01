@@ -14,11 +14,6 @@ pub struct Terrain {
 }
 
 #[derive(Component)]
-pub struct NestEntrance {
-    pub colony_id: u32,
-}
-
-#[derive(Component)]
 pub struct FoodSource {
     pub remaining: f32,
     pub max: f32,

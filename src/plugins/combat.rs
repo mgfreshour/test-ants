@@ -5,8 +5,9 @@ use crate::components::ant::{
     Ant, AntState, CarriedItem, ColonyMember, Follower, Health, Movement, PlayerControlled,
     PositionHistory, TrailSense,
 };
+use crate::components::map::MapId;
 use crate::components::pheromone::PheromoneType;
-use crate::components::terrain::NestEntrance;
+use crate::resources::active_map::{MapRegistry, viewing_surface};
 use crate::resources::pheromone::ColonyPheromones;
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 
@@ -38,7 +39,6 @@ pub struct GameResult {
 
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
-        use crate::plugins::nest::GameView;
 
         app.init_resource::<GameResult>()
             .add_systems(Startup, (spawn_red_colony, spawn_spider))
@@ -58,12 +58,12 @@ impl Plugin for CombatPlugin {
             )
             .add_systems(
                 Update,
-                player_attack.run_if(in_state(GameView::Surface)),
+                player_attack.run_if(viewing_surface),
             );
     }
 }
 
-fn spawn_red_colony(mut commands: Commands, config: Res<SimConfig>) {
+fn spawn_red_colony(mut commands: Commands, config: Res<SimConfig>, registry: Res<MapRegistry>) {
     let mut rng = rand::thread_rng();
 
     let red_nest = Vec2::new(
@@ -72,6 +72,7 @@ fn spawn_red_colony(mut commands: Commands, config: Res<SimConfig>) {
     );
 
     let size = config.tile_size * 3.0;
+    // Red colony nest entrance marker — lives on the surface map.
     commands.spawn((
         Sprite {
             color: Color::srgb(0.5, 0.15, 0.1),
@@ -80,7 +81,7 @@ fn spawn_red_colony(mut commands: Commands, config: Res<SimConfig>) {
         },
         Transform::from_xyz(red_nest.x, red_nest.y, 1.0),
         EnemyColonyNest,
-        NestEntrance { colony_id: RED_COLONY_ID },
+        MapId(registry.surface),
     ));
 
     for _ in 0..30 {
@@ -100,6 +101,7 @@ fn spawn_red_colony(mut commands: Commands, config: Res<SimConfig>) {
             ColonyMember { colony_id: RED_COLONY_ID },
             PositionHistory::default(),
             TrailSense::default(),
+            MapId(registry.surface),
         ));
     }
 }

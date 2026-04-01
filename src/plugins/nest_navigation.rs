@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 
-use crate::components::ant::Underground;
+use crate::components::map::{MapId, MapKind, MapMarker};
 use crate::components::nest::NestPath;
-use crate::plugins::nest::{GameView, NestViewEntity};
+use crate::resources::active_map::viewing_nest;
 use crate::resources::nest::{NestGrid, NEST_CELL_SIZE, NEST_HEIGHT, NEST_WIDTH};
 use crate::resources::nest_pathfinding::{GridPos, NestPathCache};
 use crate::resources::simulation::{SimClock, SimSpeed};
@@ -17,8 +17,7 @@ const WAYPOINT_THRESHOLD: f32 = 3.0;
 
 impl Plugin for NestNavigationPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<NestPathCache>()
-            .init_resource::<NestDebugPaths>()
+        app.init_resource::<NestDebugPaths>()
             .add_systems(
                 Update,
                 (
@@ -29,8 +28,7 @@ impl Plugin for NestNavigationPlugin {
             )
             .add_systems(
                 Update,
-                update_debug_path_lines
-                    .run_if(in_state(GameView::Underground)),
+                update_debug_path_lines.run_if(viewing_nest),
             );
     }
 }
@@ -74,7 +72,7 @@ fn nest_path_following(
 
     for (mut transform, mut path) in &mut query {
         if path.current_index >= path.waypoints.len() {
-            continue; // Path complete
+            continue;
         }
 
         let target_grid = path.waypoints[path.current_index];
@@ -85,7 +83,6 @@ fn nest_path_following(
 
         if dist < WAYPOINT_THRESHOLD {
             path.current_index += 1;
-            // Snap to waypoint to prevent drift
             transform.translation.x = target_world.x;
             transform.translation.y = target_world.y;
         } else {
@@ -102,18 +99,20 @@ fn nest_path_following(
     }
 }
 
-/// Clamp ant positions to passable cells — prevents walking through walls.
-/// Checks all underground ants, not just those with a path, so newly
-/// transitioned or idle ants that land in a wall are teleported to safety.
+/// Clamp ant positions to passable cells.
+/// Any ant on a nest map that ends up in a wall is relocated to the nearest
+/// passable cell. Ants outside the grid entirely are sent to the entrance.
 fn nest_grid_collision(
-    grid: Res<NestGrid>,
-    mut query: Query<(Entity, &mut Transform), With<Underground>>,
+    map_query: Query<&NestGrid, With<MapMarker>>,
+    mut ant_query: Query<(Entity, &mut Transform, &MapId)>,
 ) {
-    for (entity, mut transform) in &mut query {
+    for (entity, mut transform, map_id) in &mut ant_query {
+        let Ok(grid) = map_query.get(map_id.0) else { continue };
+
         let pos = transform.translation.truncate();
         match world_to_nest_grid(pos) {
             Some((gx, gy)) if !grid.get(gx, gy).is_passable() => {
-                if let Some((nx, ny)) = find_nearest_passable(&grid, gx, gy) {
+                if let Some((nx, ny)) = find_nearest_passable(grid, gx, gy) {
                     debug!(
                         "Ant {:?} in wall at grid ({}, {}), world ({:.1}, {:.1}) — relocating to ({}, {})",
                         entity, gx, gy, pos.x, pos.y, nx, ny
@@ -124,12 +123,11 @@ fn nest_grid_collision(
                 }
             }
             None => {
-                // Ant is outside the grid entirely — teleport to entrance
                 debug!(
                     "Ant {:?} outside nest grid at world ({:.1}, {:.1}) — teleporting to entrance",
                     entity, pos.x, pos.y
                 );
-                if let Some((ex, ey)) = find_entrance(&grid) {
+                if let Some((ex, ey)) = find_entrance(grid) {
                     let safe = nest_grid_to_world(ex, ey);
                     transform.translation.x = safe.x;
                     transform.translation.y = safe.y;
@@ -140,7 +138,6 @@ fn nest_grid_collision(
     }
 }
 
-/// Find the entrance cell (first passable cell in the center column).
 fn find_entrance(grid: &NestGrid) -> Option<GridPos> {
     let cx = grid.width / 2;
     for y in 0..grid.height {
@@ -151,13 +148,12 @@ fn find_entrance(grid: &NestGrid) -> Option<GridPos> {
     None
 }
 
-/// BFS to find the nearest passable cell from a given position.
 fn find_nearest_passable(grid: &NestGrid, x: usize, y: usize) -> Option<GridPos> {
     for radius in 1i32..10 {
         for dy in -radius..=radius {
             for dx in -radius..=radius {
                 if dx.abs() != radius && dy.abs() != radius {
-                    continue; // Only check the shell
+                    continue;
                 }
                 let nx = x as i32 + dx;
                 let ny = y as i32 + dy;
@@ -177,7 +173,6 @@ fn find_nearest_passable(grid: &NestGrid, x: usize, y: usize) -> Option<GridPos>
 
 // ── Debug path visualization ──────────────────────────────────────────
 
-/// Stores path data for debug line rendering.
 #[derive(Resource, Default)]
 pub struct NestDebugPaths {
     pub enabled: bool,
@@ -186,19 +181,17 @@ pub struct NestDebugPaths {
 #[derive(Component)]
 pub struct DebugPathLine;
 
-/// Render debug lines for ant paths. Toggle with P key.
 fn update_debug_path_lines(
     input: Res<ButtonInput<KeyCode>>,
     mut debug: ResMut<NestDebugPaths>,
     mut commands: Commands,
-    path_query: Query<(&Transform, &NestPath)>,
+    path_query: Query<(&Transform, &NestPath, &MapId)>,
     existing_lines: Query<Entity, With<DebugPathLine>>,
 ) {
     if input.just_pressed(KeyCode::KeyP) {
         debug.enabled = !debug.enabled;
     }
 
-    // Despawn old lines
     for entity in &existing_lines {
         commands.entity(entity).despawn();
     }
@@ -207,21 +200,19 @@ fn update_debug_path_lines(
         return;
     }
 
-    // Draw path lines for each ant with a NestPath
-    for (_transform, path) in &path_query {
+    for (_transform, path, map_id) in &path_query {
         if path.current_index >= path.waypoints.len() {
             continue;
         }
 
-        // Draw remaining waypoints as small dots
         for i in path.current_index..path.waypoints.len() {
             let wp = path.waypoints[i];
             let wp_world = nest_grid_to_world(wp.0, wp.1);
 
             let color = if i == path.waypoints.len() - 1 {
-                Color::srgba(0.0, 1.0, 0.0, 0.6) // Green for destination
+                Color::srgba(0.0, 1.0, 0.0, 0.6)
             } else {
-                Color::srgba(1.0, 1.0, 0.0, 0.3) // Yellow for waypoints
+                Color::srgba(1.0, 1.0, 0.0, 0.3)
             };
 
             commands.spawn((
@@ -231,7 +222,7 @@ fn update_debug_path_lines(
                     ..default()
                 },
                 Transform::from_xyz(wp_world.x, wp_world.y, 4.0),
-                NestViewEntity,
+                MapId(map_id.0),
                 DebugPathLine,
             ));
         }
