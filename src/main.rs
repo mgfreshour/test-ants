@@ -10,6 +10,7 @@ use plugins::terrain::TerrainPlugin;
 use plugins::ant_ai::AntAiPlugin;
 use plugins::camera::CameraPlugin;
 use plugins::nest::NestPlugin;
+use plugins::combat::CombatPlugin;
 use plugins::pheromone::PheromonePlugin;
 use plugins::player::PlayerPlugin;
 use ui::colony_panel::ColonyPanelPlugin;
@@ -34,6 +35,7 @@ fn main() {
             NestPlugin,
             PheromonePlugin,
             PlayerPlugin,
+            CombatPlugin,
             ColonyPanelPlugin,
             HudPlugin,
         ))

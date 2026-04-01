@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::components::pheromone::{PheromoneOverlayTile, PheromoneType};
-use crate::resources::pheromone::{PheromoneConfig, PheromoneGrid};
+use crate::resources::pheromone::{ColonyPheromones, PheromoneConfig};
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 
 pub struct PheromonePlugin;
@@ -32,35 +32,39 @@ impl Default for OverlayState {
 
 impl Plugin for PheromonePlugin {
     fn build(&self, app: &mut App) {
+        use crate::plugins::nest::GameView;
+
         app.init_resource::<PheromoneConfig>()
             .init_resource::<OverlayState>()
             .add_systems(Startup, init_pheromone_grid)
+            .add_systems(Update, pheromone_evaporate_diffuse)
             .add_systems(
                 Update,
-                (
-                    pheromone_evaporate_diffuse,
-                    toggle_overlay,
-                    update_overlay_visuals,
-                )
-                    .chain(),
+                (toggle_overlay, update_overlay_visuals)
+                    .chain()
+                    .run_if(in_state(GameView::Surface)),
             );
     }
 }
 
 fn init_pheromone_grid(mut commands: Commands, config: Res<SimConfig>) {
     let cell_size = config.tile_size;
-    let grid = PheromoneGrid::new(config.world_width, config.world_height, cell_size);
+    let grids = ColonyPheromones::new(
+        config.world_width, config.world_height, cell_size, &[0, 1],
+    );
 
-    let overlay_cell = cell_size;
-    for y in 0..grid.height {
-        for x in 0..grid.width {
-            let wx = x as f32 * overlay_cell + overlay_cell / 2.0;
-            let wy = y as f32 * overlay_cell + overlay_cell / 2.0;
+    let w = grids.width();
+    let h = grids.height();
+
+    for y in 0..h {
+        for x in 0..w {
+            let wx = x as f32 * cell_size + cell_size / 2.0;
+            let wy = y as f32 * cell_size + cell_size / 2.0;
 
             commands.spawn((
                 Sprite {
                     color: Color::srgba(0.0, 0.0, 0.0, 0.0),
-                    custom_size: Some(Vec2::splat(overlay_cell)),
+                    custom_size: Some(Vec2::splat(cell_size)),
                     ..default()
                 },
                 Transform::from_xyz(wx, wy, 5.0),
@@ -73,20 +77,20 @@ fn init_pheromone_grid(mut commands: Commands, config: Res<SimConfig>) {
         }
     }
 
-    commands.insert_resource(grid);
+    commands.insert_resource(grids);
 }
 
 fn pheromone_evaporate_diffuse(
     clock: Res<SimClock>,
     pconfig: Res<PheromoneConfig>,
-    mut grid: ResMut<PheromoneGrid>,
+    mut grids: ResMut<ColonyPheromones>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
     }
 
-    grid.evaporate(&pconfig.evaporation_rates);
-    grid.diffuse(pconfig.diffusion_rate, pconfig.max_intensity);
+    grids.evaporate_all(&pconfig.evaporation_rates);
+    grids.diffuse_all(pconfig.diffusion_rate, pconfig.max_intensity);
 }
 
 fn toggle_overlay(input: Res<ButtonInput<KeyCode>>, mut state: ResMut<OverlayState>) {
@@ -110,7 +114,7 @@ fn toggle_overlay(input: Res<ButtonInput<KeyCode>>, mut state: ResMut<OverlaySta
 }
 
 fn update_overlay_visuals(
-    grid: Res<PheromoneGrid>,
+    grids: Res<ColonyPheromones>,
     state: Res<OverlayState>,
     pconfig: Res<PheromoneConfig>,
     mut query: Query<(
@@ -127,7 +131,7 @@ fn update_overlay_visuals(
 
         let x = tile.grid_x;
         let y = tile.grid_y;
-        let values = grid.get_all(x, y);
+        let values = grids.combined_get_all(x, y);
         let max = pconfig.max_intensity;
 
         let (r, g, b, total) = match state.display_type {

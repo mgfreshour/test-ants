@@ -82,7 +82,7 @@ impl Default for SimConfig {
             ant_speed_worker: 80.0,
             ant_speed_soldier: 50.0,
             exploration_noise: 0.15,
-            nest_position: bevy::math::Vec2::new(world_width / 2.0, world_height / 2.0),
+            nest_position: bevy::math::Vec2::new(world_width * 0.25, world_height * 0.25),
         }
     }
 }

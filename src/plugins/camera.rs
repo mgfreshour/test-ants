@@ -8,8 +8,15 @@ pub struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
+        use crate::plugins::nest::GameView;
+
         app.add_systems(Startup, setup_camera)
-            .add_systems(Update, (camera_pan, camera_zoom, camera_clamp).chain());
+            .add_systems(
+                Update,
+                (camera_pan, camera_zoom, camera_clamp)
+                    .chain()
+                    .run_if(in_state(GameView::Surface)),
+            );
     }
 }
 

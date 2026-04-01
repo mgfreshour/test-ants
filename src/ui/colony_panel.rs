@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::resources::colony::BehaviorSliders;
-use crate::plugins::nest::ViewState;
+use crate::plugins::nest::GameView;
 
 pub struct ColonyPanelPlugin;
 
@@ -62,14 +62,17 @@ fn handle_slider_keys(
 
 fn update_panel_text(
     sliders: Res<BehaviorSliders>,
-    view: Res<ViewState>,
+    view: Res<State<GameView>>,
     mut query: Query<&mut Text, With<PanelText>>,
 ) {
     let Ok(mut text) = query.get_single_mut() else {
         return;
     };
 
-    let view_label = if view.underground { "Underground" } else { "Surface" };
+    let view_label = match view.get() {
+        GameView::Surface => "Surface",
+        GameView::Underground => "Underground",
+    };
 
     **text = format!(
         "View: {} [Tab]  |  Forage:{:.0}% [1+] Nurse:{:.0}% [2+] Dig:{:.0}% [3+] Defend:{:.0}% [4+]",

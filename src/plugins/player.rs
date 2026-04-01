@@ -8,7 +8,7 @@ use crate::components::pheromone::PheromoneType;
 use crate::components::terrain::FoodSource;
 use crate::plugins::ant_ai::ColonyFood;
 use crate::plugins::camera::MainCamera;
-use crate::resources::pheromone::{PheromoneConfig, PheromoneGrid};
+use crate::resources::pheromone::{ColonyPheromones, PheromoneConfig};
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 
 pub struct PlayerPlugin;
@@ -39,12 +39,21 @@ const FOLLOW_DISTANCE: f32 = 30.0;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
+        use crate::plugins::nest::GameView;
+
         app.init_resource::<PlayerMode>()
             .init_resource::<FollowerCount>()
             .add_systems(
                 Update,
                 (
                     designate_player_ant,
+                    follower_steering,
+                    update_follower_count,
+                ),
+            )
+            .add_systems(
+                Update,
+                (
                     toggle_player_mode,
                     player_movement,
                     player_pickup,
@@ -53,26 +62,28 @@ impl Plugin for PlayerPlugin {
                     player_recruit,
                     player_dismiss,
                     exchange_ant,
-                    follower_steering,
-                    update_follower_count,
                     camera_follow_player,
                     update_player_visual,
                 )
-                    .chain(),
+                    .chain()
+                    .run_if(in_state(GameView::Surface)),
             );
     }
 }
 
 fn designate_player_ant(
     mut commands: Commands,
-    query: Query<Entity, With<Ant>>,
+    query: Query<(Entity, &ColonyMember), With<Ant>>,
     existing: Query<Entity, With<PlayerControlled>>,
 ) {
     if !existing.is_empty() {
         return;
     }
-    if let Some(entity) = query.iter().next() {
-        commands.entity(entity).insert(PlayerControlled);
+    for (entity, colony) in &query {
+        if colony.colony_id == 0 {
+            commands.entity(entity).insert(PlayerControlled);
+            break;
+        }
     }
 }
 
@@ -195,8 +206,8 @@ fn player_pheromone(
     input: Res<ButtonInput<KeyCode>>,
     mode: Res<PlayerMode>,
     pconfig: Res<PheromoneConfig>,
-    mut grid: Option<ResMut<PheromoneGrid>>,
-    query: Query<&Transform, With<PlayerControlled>>,
+    mut grids: Option<ResMut<ColonyPheromones>>,
+    query: Query<(&Transform, &ColonyMember), With<PlayerControlled>>,
 ) {
     if !mode.controlling || clock.speed == SimSpeed::Paused {
         return;
@@ -207,11 +218,14 @@ fn player_pheromone(
         return;
     }
 
-    let Ok(transform) = query.get_single() else {
+    let Ok((transform, colony)) = query.get_single() else {
         return;
     };
 
-    let Some(ref mut grid) = grid else { return };
+    let Some(ref mut all_grids) = grids else { return };
+    let Some(grid) = all_grids.get_mut(colony.colony_id) else {
+        return;
+    };
     let pos = transform.translation.truncate();
     if let Some((gx, gy)) = grid.world_to_grid(pos) {
         let amt = pconfig.deposit_amount(PheromoneType::Trail) * 3.0;

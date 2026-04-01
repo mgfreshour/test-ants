@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::ant::{Ant, Caste, ColonyMember, Health, Movement, PositionHistory};
-use crate::components::nest::{Brood, BroodStage, NestTile, Queen};
+use crate::components::ant::{Ant, Caste, ColonyMember, Health, Movement, PositionHistory, TrailSense};
+use crate::components::nest::{Brood, BroodStage, CellType, NestTile, Queen};
 use crate::plugins::ant_ai::ColonyFood;
 use crate::resources::colony::{CasteRatios, ColonyStats};
 use crate::resources::nest::{NestGrid, NEST_CELL_SIZE, NEST_HEIGHT, NEST_WIDTH};
@@ -10,58 +10,81 @@ use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 
 pub struct NestPlugin;
 
-/// Marker for entities that only show in the nest (underground) view
 #[derive(Component)]
 pub struct NestViewEntity;
 
-/// Marker for entities that only show on the surface view
 #[derive(Component)]
 pub struct SurfaceViewEntity;
 
-#[derive(Resource)]
-pub struct ViewState {
-    pub underground: bool,
+#[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum GameView {
+    #[default]
+    Surface,
+    Underground,
 }
 
-impl Default for ViewState {
-    fn default() -> Self {
-        Self { underground: false }
-    }
+#[derive(Resource, Default)]
+struct SavedSurfaceCamera {
+    position: Vec2,
+    scale: f32,
+}
+
+#[derive(Component)]
+struct NestWorker {
+    target: Vec2,
+    speed: f32,
+    retarget_timer: f32,
+}
+
+#[derive(Component)]
+struct FoodStorageIndicator {
+    index: usize,
 }
 
 const QUEEN_EGG_INTERVAL: f32 = 10.0;
 const QUEEN_FOOD_COST: f32 = 2.0;
 
+fn nest_grid_to_world(gx: usize, gy: usize) -> Vec2 {
+    let offset_x = -(NEST_WIDTH as f32 * NEST_CELL_SIZE) / 2.0;
+    let offset_y = (NEST_HEIGHT as f32 * NEST_CELL_SIZE) / 2.0;
+    Vec2::new(
+        offset_x + gx as f32 * NEST_CELL_SIZE + NEST_CELL_SIZE / 2.0,
+        offset_y - gy as f32 * NEST_CELL_SIZE - NEST_CELL_SIZE / 2.0,
+    )
+}
+
 impl Plugin for NestPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NestGrid>()
-            .init_resource::<ViewState>()
             .init_resource::<ColonyStats>()
             .init_resource::<CasteRatios>()
-            .add_systems(Startup, (render_nest, spawn_queen))
+            .init_resource::<SavedSurfaceCamera>()
+            .init_state::<GameView>()
+            .add_systems(Startup, (render_nest, spawn_queen, spawn_nest_workers, spawn_food_indicators))
+            .add_systems(Update, toggle_view)
+            .add_systems(OnEnter(GameView::Underground), enter_underground)
+            .add_systems(OnExit(GameView::Underground), exit_underground)
             .add_systems(
                 Update,
                 (
-                    toggle_view,
-                    sync_view_visibility,
                     queen_egg_laying,
                     brood_development,
                     update_colony_stats,
-                )
-                    .chain(),
+                    update_food_indicators,
+                ),
+            )
+            .add_systems(
+                Update,
+                nest_worker_movement.run_if(in_state(GameView::Underground)),
             );
     }
 }
 
 fn render_nest(mut commands: Commands, grid: Res<NestGrid>) {
-    let offset_x = -(NEST_WIDTH as f32 * NEST_CELL_SIZE) / 2.0;
-    let offset_y = (NEST_HEIGHT as f32 * NEST_CELL_SIZE) / 2.0;
-
     for y in 0..grid.height {
         for x in 0..grid.width {
             let cell = grid.get(x, y);
-            let wx = offset_x + x as f32 * NEST_CELL_SIZE + NEST_CELL_SIZE / 2.0;
-            let wy = offset_y - y as f32 * NEST_CELL_SIZE - NEST_CELL_SIZE / 2.0;
+            let w = nest_grid_to_world(x, y);
 
             commands.spawn((
                 Sprite {
@@ -69,7 +92,7 @@ fn render_nest(mut commands: Commands, grid: Res<NestGrid>) {
                     custom_size: Some(Vec2::splat(NEST_CELL_SIZE)),
                     ..default()
                 },
-                Transform::from_xyz(wx, wy, 0.0),
+                Transform::from_xyz(w.x, w.y, 0.0),
                 Visibility::Hidden,
                 NestTile { grid_x: x, grid_y: y },
                 NestViewEntity,
@@ -79,13 +102,16 @@ fn render_nest(mut commands: Commands, grid: Res<NestGrid>) {
 }
 
 fn spawn_queen(mut commands: Commands) {
+    let cx = NEST_WIDTH / 2;
+    let queen_center = nest_grid_to_world(cx, 16);
+
     commands.spawn((
         Sprite {
             color: Color::srgb(0.8, 0.6, 0.1),
-            custom_size: Some(Vec2::splat(10.0)),
+            custom_size: Some(Vec2::splat(12.0)),
             ..default()
         },
-        Transform::from_xyz(0.0, -200.0, 3.0),
+        Transform::from_xyz(queen_center.x, queen_center.y, 3.0),
         Visibility::Hidden,
         Queen,
         NestViewEntity,
@@ -93,66 +119,132 @@ fn spawn_queen(mut commands: Commands) {
     ));
 }
 
-fn toggle_view(
-    input: Res<ButtonInput<KeyCode>>,
-    mut state: ResMut<ViewState>,
-    mut camera_query: Query<&mut Transform, With<crate::plugins::camera::MainCamera>>,
-) {
-    if input.just_pressed(KeyCode::Tab) {
-        state.underground = !state.underground;
-        if let Ok(mut cam) = camera_query.get_single_mut() {
-            if state.underground {
-                cam.translation.x = 0.0;
-                cam.translation.y = 0.0;
-            } else {
-                cam.translation.x = 1024.0;
-                cam.translation.y = 1024.0;
+fn spawn_nest_workers(mut commands: Commands, grid: Res<NestGrid>) {
+    let mut rng = rand::thread_rng();
+    let passable = collect_passable_cells(&grid);
+    if passable.is_empty() {
+        return;
+    }
+
+    for _ in 0..8 {
+        let &(gx, gy) = &passable[rng.gen_range(0..passable.len())];
+        let pos = nest_grid_to_world(gx, gy);
+        let jitter = Vec2::new(rng.gen_range(-4.0..4.0), rng.gen_range(-4.0..4.0));
+
+        let target_cell = passable[rng.gen_range(0..passable.len())];
+        let target = nest_grid_to_world(target_cell.0, target_cell.1);
+
+        commands.spawn((
+            Sprite {
+                color: Color::srgb(0.15, 0.12, 0.08),
+                custom_size: Some(Vec2::splat(4.0)),
+                ..default()
+            },
+            Transform::from_xyz(pos.x + jitter.x, pos.y + jitter.y, 2.0),
+            Visibility::Hidden,
+            NestViewEntity,
+            NestWorker {
+                target,
+                speed: rng.gen_range(15.0..30.0),
+                retarget_timer: rng.gen_range(0.0..3.0),
+            },
+        ));
+    }
+}
+
+fn spawn_food_indicators(mut commands: Commands) {
+    let cx = NEST_WIDTH / 2;
+    let capacity = 12;
+    let mut idx = 0;
+
+    for gy in 5..8 {
+        for gx in (cx - 5)..(cx - 1) {
+            if idx >= capacity {
+                break;
             }
+            let pos = nest_grid_to_world(gx, gy);
+
+            commands.spawn((
+                Sprite {
+                    color: Color::srgba(0.6, 0.8, 0.2, 0.0),
+                    custom_size: Some(Vec2::splat(NEST_CELL_SIZE * 0.6)),
+                    ..default()
+                },
+                Transform::from_xyz(pos.x, pos.y, 1.5),
+                Visibility::Hidden,
+                NestViewEntity,
+                FoodStorageIndicator { index: idx },
+            ));
+            idx += 1;
         }
     }
 }
 
-fn sync_view_visibility(
-    state: Res<ViewState>,
-    mut nest_q: Query<&mut Visibility, (With<NestViewEntity>, Without<SurfaceViewEntity>)>,
-    mut surface_q: Query<&mut Visibility, (With<SurfaceViewEntity>, Without<NestViewEntity>)>,
-    mut neutral_q: Query<&mut Visibility, (Without<NestViewEntity>, Without<SurfaceViewEntity>, Without<crate::plugins::camera::MainCamera>)>,
+fn collect_passable_cells(grid: &NestGrid) -> Vec<(usize, usize)> {
+    let mut cells = Vec::new();
+    for y in 0..grid.height {
+        for x in 0..grid.width {
+            let cell = grid.get(x, y);
+            if matches!(cell, CellType::Tunnel | CellType::Chamber(_)) {
+                cells.push((x, y));
+            }
+        }
+    }
+    cells
+}
+
+fn toggle_view(
+    input: Res<ButtonInput<KeyCode>>,
+    current: Res<State<GameView>>,
+    mut next: ResMut<NextState<GameView>>,
 ) {
-    if !state.is_changed() {
-        return;
-    }
-
-    for mut vis in &mut nest_q {
-        *vis = if state.underground {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-    }
-
-    for mut vis in &mut surface_q {
-        *vis = if state.underground {
-            Visibility::Hidden
-        } else {
-            Visibility::Visible
-        };
-    }
-
-    for mut vis in &mut neutral_q {
-        *vis = if state.underground {
-            Visibility::Hidden
-        } else {
-            Visibility::Inherited
-        };
+    if input.just_pressed(KeyCode::Tab) {
+        match current.get() {
+            GameView::Surface => next.set(GameView::Underground),
+            GameView::Underground => next.set(GameView::Surface),
+        }
     }
 }
 
-#[derive(Resource)]
-struct EggTimer(f32);
+fn enter_underground(
+    mut saved: ResMut<SavedSurfaceCamera>,
+    mut camera_query: Query<(&mut Transform, &mut OrthographicProjection), With<crate::plugins::camera::MainCamera>>,
+    mut nest_q: Query<&mut Visibility, With<NestViewEntity>>,
+    mut neutral_q: Query<&mut Visibility, (Without<NestViewEntity>, Without<crate::plugins::camera::MainCamera>, Without<Node>)>,
+) {
+    if let Ok((mut cam_tf, mut proj)) = camera_query.get_single_mut() {
+        saved.position = cam_tf.translation.truncate();
+        saved.scale = proj.scale;
+        cam_tf.translation.x = 0.0;
+        cam_tf.translation.y = 0.0;
+        proj.scale = 0.7;
+    }
 
-impl Default for EggTimer {
-    fn default() -> Self {
-        Self(0.0)
+    for mut vis in &mut nest_q {
+        *vis = Visibility::Visible;
+    }
+    for mut vis in &mut neutral_q {
+        *vis = Visibility::Hidden;
+    }
+}
+
+fn exit_underground(
+    saved: Res<SavedSurfaceCamera>,
+    mut camera_query: Query<(&mut Transform, &mut OrthographicProjection), With<crate::plugins::camera::MainCamera>>,
+    mut nest_q: Query<&mut Visibility, With<NestViewEntity>>,
+    mut neutral_q: Query<&mut Visibility, (Without<NestViewEntity>, Without<crate::plugins::camera::MainCamera>, Without<Node>)>,
+) {
+    if let Ok((mut cam_tf, mut proj)) = camera_query.get_single_mut() {
+        cam_tf.translation.x = saved.position.x;
+        cam_tf.translation.y = saved.position.y;
+        proj.scale = saved.scale;
+    }
+
+    for mut vis in &mut nest_q {
+        *vis = Visibility::Hidden;
+    }
+    for mut vis in &mut neutral_q {
+        *vis = Visibility::Inherited;
     }
 }
 
@@ -178,13 +270,20 @@ fn queen_egg_laying(
         *egg_timer -= QUEEN_EGG_INTERVAL;
         colony_food.stored -= QUEEN_FOOD_COST;
 
+        let mut rng = rand::thread_rng();
+        let cx = NEST_WIDTH / 2;
+        let gx = rng.gen_range((cx + 2)..(cx + 7));
+        let gy = rng.gen_range(8..12);
+        let pos = nest_grid_to_world(gx, gy);
+        let jitter = Vec2::new(rng.gen_range(-5.0..5.0), rng.gen_range(-5.0..5.0));
+
         commands.spawn((
             Sprite {
                 color: Color::srgb(0.95, 0.95, 0.85),
                 custom_size: Some(Vec2::splat(3.0)),
                 ..default()
             },
-            Transform::from_xyz(20.0, -120.0, 2.5),
+            Transform::from_xyz(pos.x + jitter.x, pos.y + jitter.y, 2.5),
             Visibility::Hidden,
             Brood::new_egg(),
             NestViewEntity,
@@ -197,6 +296,7 @@ fn brood_development(
     time: Res<Time>,
     config: Res<SimConfig>,
     caste_ratios: Res<CasteRatios>,
+    view: Res<State<GameView>>,
     mut commands: Commands,
     mut brood_query: Query<(Entity, &mut Brood, &mut Sprite)>,
 ) {
@@ -224,7 +324,6 @@ fn brood_development(
                     sprite.custom_size = Some(Vec2::splat(5.0));
                 }
                 BroodStage::Pupa => {
-                    // Hatch into adult ant on the surface
                     commands.entity(entity).despawn();
 
                     let nest = config.nest_position;
@@ -253,6 +352,12 @@ fn brood_development(
                     let offset_x = rng.gen_range(-15.0..15.0);
                     let offset_y = rng.gen_range(-15.0..15.0);
 
+                    let vis = if *view.get() == GameView::Underground {
+                        Visibility::Hidden
+                    } else {
+                        Visibility::Inherited
+                    };
+
                     commands.spawn((
                         Sprite {
                             color,
@@ -260,6 +365,7 @@ fn brood_development(
                             ..default()
                         },
                         Transform::from_xyz(nest.x + offset_x, nest.y + offset_y, 2.0),
+                        vis,
                         Ant {
                             caste,
                             state,
@@ -270,6 +376,7 @@ fn brood_development(
                         health,
                         ColonyMember { colony_id: 0 },
                         PositionHistory::default(),
+                        TrailSense::default(),
                     ));
                 }
             }
@@ -303,6 +410,65 @@ fn update_colony_stats(
             BroodStage::Egg => stats.eggs += 1,
             BroodStage::Larva => stats.larvae += 1,
             BroodStage::Pupa => stats.pupae += 1,
+        }
+    }
+}
+
+fn nest_worker_movement(
+    clock: Res<SimClock>,
+    time: Res<Time>,
+    grid: Res<NestGrid>,
+    mut query: Query<(&mut Transform, &mut NestWorker)>,
+) {
+    if clock.speed == SimSpeed::Paused {
+        return;
+    }
+
+    let dt = time.delta_secs() * clock.speed.multiplier();
+    let mut rng = rand::thread_rng();
+    let passable = collect_passable_cells(&grid);
+    if passable.is_empty() {
+        return;
+    }
+
+    for (mut transform, mut worker) in &mut query {
+        worker.retarget_timer -= dt;
+
+        let pos = transform.translation.truncate();
+        let to_target = worker.target - pos;
+        let dist = to_target.length();
+
+        if dist < 4.0 || worker.retarget_timer <= 0.0 {
+            let &(gx, gy) = &passable[rng.gen_range(0..passable.len())];
+            let new_target = nest_grid_to_world(gx, gy);
+            let jitter = Vec2::new(rng.gen_range(-4.0..4.0), rng.gen_range(-4.0..4.0));
+            worker.target = new_target + jitter;
+            worker.retarget_timer = rng.gen_range(2.0..6.0);
+        } else {
+            let dir = to_target.normalize();
+            let step = dir * worker.speed * dt;
+            transform.translation.x += step.x;
+            transform.translation.y += step.y;
+        }
+    }
+}
+
+fn update_food_indicators(
+    colony_food: Res<ColonyFood>,
+    mut query: Query<(&FoodStorageIndicator, &mut Sprite)>,
+) {
+    let food = colony_food.stored;
+    let food_per_slot = 5.0;
+
+    for (indicator, mut sprite) in &mut query {
+        let threshold = indicator.index as f32 * food_per_slot;
+        if food > threshold + food_per_slot {
+            sprite.color = Color::srgba(0.55, 0.75, 0.15, 0.85);
+        } else if food > threshold {
+            let frac = (food - threshold) / food_per_slot;
+            sprite.color = Color::srgba(0.55, 0.75, 0.15, frac * 0.85);
+        } else {
+            sprite.color = Color::srgba(0.55, 0.75, 0.15, 0.0);
         }
     }
 }

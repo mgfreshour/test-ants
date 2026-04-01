@@ -26,7 +26,7 @@ impl Default for PheromoneConfig {
     fn default() -> Self {
         Self {
             //                      Home     Food     Alarm    Trail
-            evaporation_rates: [0.0005,  0.0002,  0.0005,  0.0005],
+            evaporation_rates: [0.0002,  0.002,  0.05,  0.05],
             diffusion_rate: 0.005,
             deposit_amounts:   [3.0,     8.0,     2.5,     2.5],
             max_intensity: 200.0,
@@ -149,7 +149,8 @@ impl PheromoneGrid {
 
         for (idx, delta) in deltas.iter().enumerate() {
             for i in 0..PheromoneType::COUNT {
-                self.cells[idx][i] = (self.cells[idx][i] + delta[i]).clamp(0.0, max);
+                let v = (self.cells[idx][i] + delta[i]).clamp(0.0, max);
+                self.cells[idx][i] = if v < 0.001 { 0.0 } else { v };
             }
         }
     }
@@ -214,5 +215,62 @@ impl PheromoneGrid {
         } else {
             0.0
         }
+    }
+}
+
+/// Per-colony pheromone grids. Each colony has its own grid so trails
+/// don't cross-pollinate between colonies.
+#[derive(Resource)]
+pub struct ColonyPheromones {
+    pub grids: std::collections::HashMap<u32, PheromoneGrid>,
+}
+
+impl ColonyPheromones {
+    pub fn new(world_width: f32, world_height: f32, cell_size: f32, colony_ids: &[u32]) -> Self {
+        let mut grids = std::collections::HashMap::new();
+        for &id in colony_ids {
+            grids.insert(id, PheromoneGrid::new(world_width, world_height, cell_size));
+        }
+        Self { grids }
+    }
+
+    pub fn get(&self, colony_id: u32) -> Option<&PheromoneGrid> {
+        self.grids.get(&colony_id)
+    }
+
+    pub fn get_mut(&mut self, colony_id: u32) -> Option<&mut PheromoneGrid> {
+        self.grids.get_mut(&colony_id)
+    }
+
+    pub fn evaporate_all(&mut self, rates: &[f32; PheromoneType::COUNT]) {
+        for grid in self.grids.values_mut() {
+            grid.evaporate(rates);
+        }
+    }
+
+    pub fn diffuse_all(&mut self, rate: f32, max: f32) {
+        for grid in self.grids.values_mut() {
+            grid.diffuse(rate, max);
+        }
+    }
+
+    /// Get combined intensity across all colonies at a cell for overlay display
+    pub fn combined_get_all(&self, x: usize, y: usize) -> [f32; PheromoneType::COUNT] {
+        let mut result = [0.0f32; PheromoneType::COUNT];
+        for grid in self.grids.values() {
+            let vals = grid.get_all(x, y);
+            for i in 0..PheromoneType::COUNT {
+                result[i] += vals[i];
+            }
+        }
+        result
+    }
+
+    pub fn width(&self) -> usize {
+        self.grids.values().next().map(|g| g.width).unwrap_or(0)
+    }
+
+    pub fn height(&self) -> usize {
+        self.grids.values().next().map(|g| g.height).unwrap_or(0)
     }
 }
