@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 
-use crate::components::ant::Ant;
 use crate::components::pheromone::{PheromoneOverlayTile, PheromoneType};
 use crate::resources::pheromone::{PheromoneConfig, PheromoneGrid};
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
@@ -39,7 +38,6 @@ impl Plugin for PheromonePlugin {
             .add_systems(
                 Update,
                 (
-                    pheromone_deposit,
                     pheromone_evaporate_diffuse,
                     toggle_overlay,
                     update_overlay_visuals,
@@ -76,30 +74,6 @@ fn init_pheromone_grid(mut commands: Commands, config: Res<SimConfig>) {
     }
 
     commands.insert_resource(grid);
-}
-
-fn pheromone_deposit(
-    clock: Res<SimClock>,
-    pconfig: Res<PheromoneConfig>,
-    mut grid: ResMut<PheromoneGrid>,
-    query: Query<&Transform, With<Ant>>,
-) {
-    if clock.speed == SimSpeed::Paused {
-        return;
-    }
-
-    for transform in &query {
-        let pos = transform.translation.truncate();
-        if let Some((gx, gy)) = grid.world_to_grid(pos) {
-            grid.deposit(
-                gx,
-                gy,
-                PheromoneType::Home,
-                pconfig.deposit_amount,
-                pconfig.max_intensity,
-            );
-        }
-    }
 }
 
 fn pheromone_evaporate_diffuse(

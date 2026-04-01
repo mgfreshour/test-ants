@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 
-use crate::components::ant::Ant;
+use crate::components::ant::{Ant, AntState, CarriedItem};
+use crate::plugins::ant_ai::ColonyFood;
 use crate::plugins::pheromone::{OverlayDisplay, OverlayState};
 use crate::resources::simulation::SimClock;
 
@@ -39,15 +40,26 @@ fn setup_hud(mut commands: Commands) {
 fn update_hud(
     clock: Res<SimClock>,
     overlay: Res<OverlayState>,
+    colony_food: Res<ColonyFood>,
     diagnostics: Res<DiagnosticsStore>,
-    ant_query: Query<&Ant>,
+    ant_query: Query<(&Ant, Option<&CarriedItem>)>,
     mut text_query: Query<&mut Text, With<HudText>>,
 ) {
     let Ok(mut text) = text_query.get_single_mut() else {
         return;
     };
 
-    let ant_count = ant_query.iter().count();
+    let mut total = 0;
+    let mut foraging = 0;
+    let mut returning = 0;
+    for (ant, _carried) in &ant_query {
+        total += 1;
+        match ant.state {
+            AntState::Foraging => foraging += 1,
+            AntState::Returning => returning += 1,
+            _ => {}
+        }
+    }
 
     let fps = diagnostics
         .get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FPS)
@@ -67,12 +79,14 @@ fn update_hud(
     };
 
     **text = format!(
-        "Ants: {}  |  Speed: {}  |  Overlay: {}  |  FPS: {:.0}  |  Time: {:.1}s\n\
+        "Ants: {} (forage:{} return:{})  |  Food: {:.0}  |  Speed: {}  |  Overlay: {}  |  FPS: {:.0}\n\
          [Space] Pause  [.] Speed  [H] Overlay  [WASD] Pan  [Scroll] Zoom",
-        ant_count,
+        total,
+        foraging,
+        returning,
+        colony_food.stored,
         clock.speed.label(),
         overlay_label,
         fps,
-        clock.elapsed,
     );
 }
