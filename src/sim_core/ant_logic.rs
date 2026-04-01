@@ -83,6 +83,33 @@ pub fn food_pheromone_deposit_amount(is_returning: bool, base_amount: f32, carri
     Some(amount)
 }
 
+/// Decide which recruit state an ant should transition to based on local
+/// pheromone intensities. Returns `Some("attack")`, `Some("follow")`, or
+/// `None` when neither signal is strong enough.
+pub fn recruit_entry_decision(
+    attack_recruit_intensity: f32,
+    recruit_intensity: f32,
+    threshold: f32,
+) -> Option<&'static str> {
+    if attack_recruit_intensity >= threshold {
+        Some("attack")
+    } else if recruit_intensity >= threshold {
+        Some("follow")
+    } else {
+        None
+    }
+}
+
+/// After combat ends, decide whether an ant should return to Attacking
+/// (attack pheromone still present) or fall back to Foraging.
+pub fn post_combat_state(attack_recruit_intensity: f32, signal_threshold: f32) -> &'static str {
+    if attack_recruit_intensity >= signal_threshold {
+        "attacking"
+    } else {
+        "foraging"
+    }
+}
+
 pub fn apply_boundary_bounce(pos: Vec2, dir: Vec2, min: Vec2, max: Vec2) -> (Vec2, Vec2) {
     let mut next_pos = pos;
     let mut next_dir = dir;
@@ -197,6 +224,31 @@ mod tests {
                 assert!(hp_loss >= 0.0);
             }
         }
+    }
+
+    #[test]
+    fn attack_recruit_takes_priority_over_follow_recruit() {
+        // Both signals above threshold — attack wins
+        assert_eq!(recruit_entry_decision(1.0, 1.0, 0.8), Some("attack"));
+        // Only follow signal
+        assert_eq!(recruit_entry_decision(0.2, 1.0, 0.8), Some("follow"));
+        // Only attack signal
+        assert_eq!(recruit_entry_decision(1.0, 0.2, 0.8), Some("attack"));
+        // Neither
+        assert_eq!(recruit_entry_decision(0.2, 0.3, 0.8), None);
+    }
+
+    #[test]
+    fn attack_recruit_threshold_is_exact() {
+        assert_eq!(recruit_entry_decision(0.8, 0.0, 0.8), Some("attack"));
+        assert_eq!(recruit_entry_decision(0.79, 0.0, 0.8), None);
+    }
+
+    #[test]
+    fn post_combat_returns_to_attacking_with_signal() {
+        assert_eq!(post_combat_state(0.5, 0.4), "attacking");
+        assert_eq!(post_combat_state(0.3, 0.4), "foraging");
+        assert_eq!(post_combat_state(0.4, 0.4), "attacking");
     }
 
     #[test]

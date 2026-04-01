@@ -15,6 +15,35 @@ use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 /// Radius (in grid cells) around the player where Recruit pheromone is deposited
 const RECRUIT_DEPOSIT_RADIUS: i32 = 3;
 
+/// Which pheromone the R key deposits: follow (Recruit) or attack (AttackRecruit).
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecruitMode {
+    Follow,
+    Attack,
+}
+
+impl Default for RecruitMode {
+    fn default() -> Self {
+        Self::Follow
+    }
+}
+
+impl RecruitMode {
+    pub fn pheromone_type(self) -> PheromoneType {
+        match self {
+            RecruitMode::Follow => PheromoneType::Recruit,
+            RecruitMode::Attack => PheromoneType::AttackRecruit,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            RecruitMode::Follow => "Follow",
+            RecruitMode::Attack => "Attack",
+        }
+    }
+}
+
 pub struct PlayerPlugin;
 
 #[derive(Resource)]
@@ -44,6 +73,7 @@ impl Plugin for PlayerPlugin {
 
         app.init_resource::<PlayerMode>()
             .init_resource::<FollowerCount>()
+            .init_resource::<RecruitMode>()
             .add_systems(
                 Update,
                 (
@@ -55,6 +85,7 @@ impl Plugin for PlayerPlugin {
                 Update,
                 (
                     toggle_player_mode,
+                    toggle_recruit_mode,
                     player_movement,
                     player_pickup,
                     player_drop,
@@ -101,6 +132,22 @@ fn toggle_player_mode(
             mode.controlling = true;
             mode.follow_camera = true;
         }
+    }
+}
+
+fn toggle_recruit_mode(
+    input: Res<ButtonInput<KeyCode>>,
+    mode: Res<PlayerMode>,
+    mut recruit_mode: ResMut<RecruitMode>,
+) {
+    if !mode.controlling {
+        return;
+    }
+    if input.just_pressed(KeyCode::KeyV) {
+        *recruit_mode = match *recruit_mode {
+            RecruitMode::Follow => RecruitMode::Attack,
+            RecruitMode::Attack => RecruitMode::Follow,
+        };
     }
 }
 
@@ -273,12 +320,14 @@ fn player_pheromone(
     }
 }
 
-/// Hold R to deposit Recruit pheromone in a wide area around the player.
-/// Nearby ants will sense the gradient and follow it toward the player.
+/// Hold R to deposit recruit pheromone (follow or attack, based on current mode)
+/// in a wide area around the player. Nearby ants will sense the gradient and
+/// follow it toward the player.
 fn player_recruit_pheromone(
     clock: Res<SimClock>,
     input: Res<ButtonInput<KeyCode>>,
     mode: Res<PlayerMode>,
+    recruit_mode: Res<RecruitMode>,
     pconfig: Res<PheromoneConfig>,
     mut grids: Option<ResMut<ColonyPheromones>>,
     query: Query<(&Transform, &ColonyMember), With<PlayerControlled>>,
@@ -304,7 +353,8 @@ fn player_recruit_pheromone(
         return;
     };
 
-    let amt = pconfig.deposit_amount(PheromoneType::Recruit);
+    let ptype = recruit_mode.pheromone_type();
+    let amt = pconfig.deposit_amount(ptype);
     for dy in -RECRUIT_DEPOSIT_RADIUS..=RECRUIT_DEPOSIT_RADIUS {
         for dx in -RECRUIT_DEPOSIT_RADIUS..=RECRUIT_DEPOSIT_RADIUS {
             let gx = cx as i32 + dx;
@@ -315,7 +365,7 @@ fn player_recruit_pheromone(
                 grid.deposit(
                     gx as usize,
                     gy as usize,
-                    PheromoneType::Recruit,
+                    ptype,
                     amt * falloff,
                     pconfig.max_intensity,
                 );
@@ -324,7 +374,8 @@ fn player_recruit_pheromone(
     }
 }
 
-/// Press T to clear all Recruit pheromone for this colony, dismissing followers.
+/// Press T to clear both Recruit and AttackRecruit pheromone for this colony,
+/// dismissing all followers regardless of mode.
 fn player_dismiss_pheromone(
     input: Res<ButtonInput<KeyCode>>,
     mode: Res<PlayerMode>,
@@ -347,6 +398,7 @@ fn player_dismiss_pheromone(
     for y in 0..grid.height {
         for x in 0..grid.width {
             grid.clear_type(x, y, PheromoneType::Recruit);
+            grid.clear_type(x, y, PheromoneType::AttackRecruit);
         }
     }
 }

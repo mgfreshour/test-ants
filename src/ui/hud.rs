@@ -4,7 +4,7 @@ use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use crate::components::ant::{Ant, AntState, CarriedItem, PlayerControlled};
 use crate::components::map::MapMarker;
 use crate::plugins::ant_ai::ColonyFood;
-use crate::plugins::player::{FollowerCount, PlayerMode};
+use crate::plugins::player::{FollowerCount, PlayerMode, RecruitMode};
 use crate::plugins::pheromone::{OverlayDisplay, OverlayState};
 use crate::resources::active_map::{ActiveMap, MapRegistry};
 use crate::resources::colony::ColonyStats;
@@ -49,6 +49,7 @@ fn update_hud(
     stats: Res<ColonyStats>,
     player_mode: Res<PlayerMode>,
     _followers: Res<FollowerCount>,
+    recruit_mode: Res<RecruitMode>,
     food_query: Query<&ColonyFood, With<MapMarker>>,
     diagnostics: Res<DiagnosticsStore>,
     ant_query: Query<(&Ant, Option<&CarriedItem>)>,
@@ -86,11 +87,13 @@ fn update_hud(
             let mut foraging = 0u32;
             let mut returning = 0u32;
             let mut following = 0u32;
+            let mut attacking = 0u32;
             for (ant, _carried) in &ant_query {
                 match ant.state {
                     AntState::Foraging => foraging += 1,
                     AntState::Returning => returning += 1,
                     AntState::Following => following += 1,
+                    AntState::Attacking => attacking += 1,
                     _ => {}
                 }
             }
@@ -103,6 +106,7 @@ fn update_hud(
                     OverlayDisplay::Alarm => "Alarm",
                     OverlayDisplay::Trail => "Trail",
                     OverlayDisplay::Recruit => "Recruit",
+                    OverlayDisplay::AttackRecruit => "Attack",
                 }
             } else {
                 "Off"
@@ -118,16 +122,17 @@ fn update_hud(
                 .unwrap_or_default();
 
             **text = format!(
-                "[{}] Pop:{} Brood:{}  |  Food:{:.0}  |  Forage:{} Ret:{} Follow:{}  |  {}  |  Overlay:{}  |  FPS:{:.0}{}\n\
-                 WASD:move E:pick Q:drop Shift:trail R(hold):recruit T:dismiss X:swap F:feed Tab:nest",
+                "[{}] Pop:{} Brood:{}  |  Food:{:.0}  |  Forage:{} Ret:{} Follow:{} Atk:{}  |  {}  |  Overlay:{}  |  FPS:{:.0}{}\n\
+                 WASD:move E:pick Q:drop Shift:trail R(hold):recruit T:dismiss V:mode({}) X:swap F:feed Tab:nest",
                 mode_str,
                 pop, brood,
                 food_stored,
-                foraging, returning, following,
+                foraging, returning, following, attacking,
                 clock.speed.label(),
                 overlay_label,
                 fps,
                 player_carrying,
+                recruit_mode.label(),
             );
         }
         MapKind::SpecialZone { zone_id } => {

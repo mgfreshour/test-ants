@@ -10,6 +10,7 @@ use crate::components::pheromone::PheromoneType;
 use crate::resources::active_map::{MapRegistry, viewing_surface};
 use crate::resources::pheromone::ColonyPheromones;
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
+use crate::sim_core::ant_logic;
 
 pub struct CombatPlugin;
 
@@ -130,6 +131,7 @@ fn spawn_spider(mut commands: Commands, config: Res<SimConfig>) {
 
 fn ant_combat_detection(
     clock: Res<SimClock>,
+    grids: Option<Res<ColonyPheromones>>,
     mut query: Query<(Entity, &Transform, &ColonyMember, &mut Ant)>,
 ) {
     if clock.speed == SimSpeed::Paused {
@@ -155,11 +157,24 @@ fn ant_combat_detection(
         }
     }
 
-    for (entity, _, _, mut ant) in &mut query {
+    for (entity, transform, colony, mut ant) in &mut query {
         if in_combat.contains(&entity) {
             ant.state = AntState::Defending;
         } else if ant.state == AntState::Defending {
-            ant.state = AntState::Foraging;
+            // Return to Attacking if AttackRecruit pheromone is present, else Foraging
+            let mut attack_intensity = 0.0f32;
+            if let Some(ref all_grids) = grids {
+                if let Some(grid) = all_grids.get(colony.colony_id) {
+                    let pos = transform.translation.truncate();
+                    if let Some((gx, gy)) = grid.world_to_grid(pos) {
+                        attack_intensity = grid.get(gx, gy, PheromoneType::AttackRecruit);
+                    }
+                }
+            }
+            ant.state = match ant_logic::post_combat_state(attack_intensity, 0.4) {
+                "attacking" => AntState::Attacking,
+                _ => AntState::Foraging,
+            };
         }
     }
 }

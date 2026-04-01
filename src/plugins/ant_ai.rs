@@ -48,6 +48,7 @@ impl Plugin for AntAiPlugin {
                     fix_orphaned_returners,
                     ant_forage_steering,
                     ant_follow_recruit_steering,
+                    ant_attack_recruit_steering,
                     ant_return_steering,
                     food_detection_and_pickup,
                     nest_food_deposit,
@@ -261,14 +262,16 @@ fn ant_forage_steering(
         let pos = transform.translation.truncate();
         let fwd = movement.direction;
 
-        // Check for Recruit pheromone — if strong enough, switch to Following
+        // Check for Recruit / AttackRecruit pheromone — if strong enough, switch state
         if let Some(ref all_grids) = grids {
             if let Some(grid) = all_grids.get(colony.colony_id) {
                 if let Some((gx, gy)) = grid.world_to_grid(pos) {
+                    let attack_local = grid.get(gx, gy, PheromoneType::AttackRecruit);
                     let recruit_local = grid.get(gx, gy, PheromoneType::Recruit);
-                    if recruit_local >= RECRUIT_SENSE_THRESHOLD {
-                        ant.state = AntState::Following;
-                        continue;
+                    match ant_logic::recruit_entry_decision(attack_local, recruit_local, RECRUIT_SENSE_THRESHOLD) {
+                        Some("attack") => { ant.state = AntState::Attacking; continue; }
+                        Some("follow") => { ant.state = AntState::Following; continue; }
+                        _ => {}
                     }
                 }
             }
@@ -392,6 +395,98 @@ fn ant_follow_recruit_steering(
 
         if has_signal {
             *sense = TrailSense::FollowingTrail;
+        } else {
+            ant.state = AntState::Foraging;
+            *sense = TrailSense::Searching;
+        }
+    }
+}
+
+/// Attack-recruit followers: steer along the AttackRecruit pheromone gradient like
+/// regular followers, but also aggressively target nearby enemies. When an enemy
+/// is within detection range they steer toward it and enter Defending on contact.
+const ATTACK_ENEMY_DETECT_RANGE: f32 = 80.0;
+
+fn ant_attack_recruit_steering(
+    clock: Res<SimClock>,
+    grids: Option<Res<ColonyPheromones>>,
+    mut query: Query<(&Transform, &mut Movement, &mut Ant, &ColonyMember, &mut TrailSense), Without<PlayerControlled>>,
+    enemy_query: Query<(&Transform, &ColonyMember), With<Ant>>,
+) {
+    if clock.speed == SimSpeed::Paused {
+        return;
+    }
+
+    let mut rng = rand::thread_rng();
+
+    for (transform, mut movement, mut ant, colony, mut sense) in &mut query {
+        if ant.state != AntState::Attacking {
+            continue;
+        }
+
+        let pos = transform.translation.truncate();
+        let fwd = movement.direction;
+
+        // Check for nearby enemies first — attack takes priority over gradient following
+        let mut nearest_enemy: Option<(f32, Vec2)> = None;
+        for (enemy_tf, enemy_col) in &enemy_query {
+            if enemy_col.colony_id == colony.colony_id {
+                continue;
+            }
+            let enemy_pos = enemy_tf.translation.truncate();
+            let dist = pos.distance(enemy_pos);
+            if dist < ATTACK_ENEMY_DETECT_RANGE {
+                if nearest_enemy.is_none() || dist < nearest_enemy.unwrap().0 {
+                    nearest_enemy = Some((dist, enemy_pos));
+                }
+            }
+        }
+
+        if let Some((dist, enemy_pos)) = nearest_enemy {
+            let to_enemy = (enemy_pos - pos).normalize_or_zero();
+            movement.direction = to_enemy;
+            // Within combat range, combat_detection system handles state transition
+            if dist < 15.0 {
+                ant.state = AntState::Defending;
+                *sense = TrailSense::FollowingAlarm;
+            } else {
+                *sense = TrailSense::FollowingAttack;
+            }
+            continue;
+        }
+
+        // No enemies nearby — follow the AttackRecruit gradient
+        let mut has_signal = false;
+
+        if let Some(ref all_grids) = grids {
+            if let Some(grid) = all_grids.get(colony.colony_id) {
+                if let Some((gx, gy)) = grid.world_to_grid(pos) {
+                    let local = grid.get(gx, gy, PheromoneType::AttackRecruit);
+                    if local >= RECRUIT_SENSE_THRESHOLD * 0.5 {
+                        has_signal = true;
+                        let grad = grid.sense_gradient(
+                            gx, gy, PheromoneType::AttackRecruit, fwd, PHERO_SENSE_RADIUS + 2,
+                        );
+                        if grad.length_squared() > 0.001 {
+                            let jitter = Vec2::new(
+                                rng.gen_range(-0.1..0.1),
+                                rng.gen_range(-0.1..0.1),
+                            );
+                            let new_dir = (grad.normalize() * RECRUIT_GRADIENT_WEIGHT
+                                + fwd * 0.3
+                                + jitter)
+                                .normalize_or_zero();
+                            if new_dir != Vec2::ZERO {
+                                movement.direction = new_dir;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if has_signal {
+            *sense = TrailSense::FollowingAttack;
         } else {
             ant.state = AntState::Foraging;
             *sense = TrailSense::Searching;
@@ -794,6 +889,7 @@ fn update_state_labels(
         let (letter, color) = match ant.state {
             AntState::Defending | AntState::Fighting => ("!", Color::srgb(1.0, 0.3, 0.3)),
             AntState::Following => (">", Color::srgb(0.5, 0.8, 1.0)),
+            AntState::Attacking => ("!", Color::srgb(1.0, 0.35, 0.2)),
             AntState::Idle => ("I", Color::srgba(1.0, 1.0, 1.0, 0.5)),
             AntState::Nursing => ("N", Color::srgb(0.8, 0.6, 1.0)),
             AntState::Digging => ("G", Color::srgb(0.7, 0.5, 0.3)),

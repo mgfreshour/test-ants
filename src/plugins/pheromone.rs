@@ -20,6 +20,7 @@ pub enum OverlayDisplay {
     Alarm,
     Trail,
     Recruit,
+    AttackRecruit,
 }
 
 impl Default for OverlayState {
@@ -106,7 +107,8 @@ fn toggle_overlay(input: Res<ButtonInput<KeyCode>>, mut state: ResMut<OverlaySta
                 OverlayDisplay::Food => OverlayDisplay::Alarm,
                 OverlayDisplay::Alarm => OverlayDisplay::Trail,
                 OverlayDisplay::Trail => OverlayDisplay::Recruit,
-                OverlayDisplay::Recruit => {
+                OverlayDisplay::Recruit => OverlayDisplay::AttackRecruit,
+                OverlayDisplay::AttackRecruit => {
                     state.visible = false;
                     OverlayDisplay::All
                 }
@@ -168,6 +170,10 @@ fn update_overlay_visuals(
             OverlayDisplay::Recruit => {
                 let v = values[PheromoneType::Recruit.index()] / max;
                 (0.3 * v, 0.9 * v, v, v)
+            }
+            OverlayDisplay::AttackRecruit => {
+                let v = values[PheromoneType::AttackRecruit.index()] / max;
+                (v, 0.35 * v, 0.2 * v, v)
             }
         };
 

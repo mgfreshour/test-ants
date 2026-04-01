@@ -19,6 +19,7 @@ pub enum AntState {
     Fighting,
     Fleeing,
     Following,
+    Attacking,
 }
 
 #[derive(Component)]
@@ -122,6 +123,7 @@ pub enum TrailSense {
     FollowingHome,
     FollowingAlarm,
     FollowingTrail,
+    FollowingAttack,
     BeelineFood,
     BeelineNest,
 }

@@ -30,10 +30,10 @@ impl PheromoneConfig {
 impl Default for PheromoneConfig {
     fn default() -> Self {
         Self {
-            //                        Home     Food     Alarm    Trail    Recruit
-            evaporation_rates:    [0.0002,  0.002,   0.05,    0.05,    0.01],
-            diffusion_rates:      [0.005,   0.005,   0.005,   0.005,   0.04],
-            deposit_amounts:      [3.0,     8.0,     2.5,     2.5,     15.0],
+            //                        Home     Food     Alarm    Trail    Recruit  AttackRecruit
+            evaporation_rates:    [0.0002,  0.002,   0.05,    0.05,    0.01,    0.01],
+            diffusion_rates:      [0.005,   0.005,   0.005,   0.005,   0.04,    0.04],
+            deposit_amounts:      [3.0,     8.0,     2.5,     2.5,     15.0,    15.0],
             max_intensity: 200.0,
         }
     }
