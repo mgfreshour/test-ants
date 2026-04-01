@@ -122,6 +122,7 @@ mod tests {
         let input = NestScoringInputBuilder::new()
             .larvae(5)
             .food(4.0)
+            .age(0.0)
             .build();
         let scores = compute_scores(&input);
         assert_eq!(choose_task(&scores), NestTaskChoice::FeedLarva);

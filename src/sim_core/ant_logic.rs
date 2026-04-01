@@ -127,7 +127,7 @@ mod tests {
     #[test]
     fn hunger_step_self_feeds_when_carrying() {
         let (h, _) = hunger_tick_step(0.6, 1.0, 0.0, Some(1.0), 0.5, 0.4, 0.5);
-        assert_eq!(h, 0.2);
+        assert!((h - 0.2).abs() < 1e-6);
     }
 
     #[test]

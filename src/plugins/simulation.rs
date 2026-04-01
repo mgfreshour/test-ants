@@ -52,6 +52,7 @@ mod tests {
     fn sim_plugin_advances_tick_when_running() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, SimulationPlugin));
+        app.insert_resource(ButtonInput::<KeyCode>::default());
 
         let before = app.world().resource::<SimClock>().tick;
         app.update();
@@ -64,6 +65,7 @@ mod tests {
     fn sim_plugin_does_not_advance_tick_when_paused() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, SimulationPlugin));
+        app.insert_resource(ButtonInput::<KeyCode>::default());
 
         {
             let mut clock = app.world_mut().resource_mut::<SimClock>();

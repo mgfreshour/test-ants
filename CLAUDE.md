@@ -52,16 +52,69 @@
 - `docs/NEST_AI_AND_NAVIGATION.md`: Deep-dive notes for nest AI/navigation.
 - `docs/SIMULATION_TESTING_WORK_PLAN.md`: Simulation testing work plan.
 
+## Testing Philosophy
+
+### Simulation-First Rule
+
+Test simulation logic, not presentation logic.
+
+Prioritize tests for:
+- state transitions
+- decision/utility scoring
+- economy/resource rules
+- pheromone behavior rules
+- timing semantics (`dt`, pause, speed)
+- invariants (bounded values, no invalid states)
+
+Do not write tests for:
+- sprite colors/sizes or text labels
+- camera/view behavior
+- HUD/render presentation details
+- visual visibility toggles as UI assertions
+
+### Architecture Preference for Testability
+
+- Prefer pure logic in `src/sim_core/*` for decision and transition rules.
+- Keep ECS mutation/wiring in plugins, but extract rule computations into pure helpers.
+- Use deterministic randomness for test-sensitive logic (`SimRng` + seeded implementation).
+
 ## Testing Workflow
 
-Before marking tasks as complete or declaring code changes finished:
+Before marking tasks complete:
 
-1. **Build check**: Run `cargo build 2>&1` to verify the code compiles without errors
-2. **Runtime validation**: Run the application with timeout to verify it starts without panics:
+1. **Build check**
+   ```bash
+   cargo build 2>&1
+   ```
+
+2. **Runtime validation**
    ```bash
    timeout 3s cargo run 2>&1
    ```
-   - Exit code 124 indicates successful timeout (app ran without panicking)
-   - Any other exit code or panic output indicates a runtime error that must be fixed
+   - Exit code `124` is expected (app started and was intentionally timed out)
+   - Any panic output or non-`124` error exit is a failure
 
-This ensures both compile-time and runtime correctness before considering work complete.
+## Test Command Set
+
+Use this split to keep feedback fast:
+
+- **Fast simulation unit suite**
+  ```bash
+  cargo test sim_core::
+  ```
+
+- **Headless integration suite**
+  ```bash
+  cargo test sim_plugin_
+  ```
+
+- **Full local simulation validation sequence**
+  ```bash
+  cargo build 2>&1 && cargo test sim_core:: && cargo test sim_plugin_ && timeout 3s cargo run 2>&1
+  ```
+
+## PR Quality Expectations
+
+- Every simulation behavior change should include tests in the same change.
+- Bug fixes should add a regression test for the fixed behavior.
+- Review simulation PRs with `docs/SIMULATION_PR_REVIEW_CHECKLIST.md`.
