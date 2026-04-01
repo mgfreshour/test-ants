@@ -110,6 +110,9 @@ pub struct CarriedItem {
 #[derive(Component)]
 pub struct PlayerControlled;
 
+#[derive(Component)]
+pub struct Follower;
+
 impl Ant {
     pub fn new_worker() -> Self {
         Self {

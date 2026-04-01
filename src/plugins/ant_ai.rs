@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::ant::{Ant, AntState, CarriedItem, ColonyMember, Health, Movement, PositionHistory};
+use crate::components::ant::{Ant, AntState, CarriedItem, ColonyMember, Follower, Health, Movement, PlayerControlled, PositionHistory};
 use crate::components::pheromone::PheromoneType;
 use crate::components::terrain::{FoodSource, NestEntrance};
 use crate::resources::pheromone::{PheromoneConfig, PheromoneGrid};
@@ -85,7 +85,7 @@ const TRAIL_FOLLOW_CHANCE: f32 = 0.6;
 
 /// Reset ants stuck in Returning state without food back to Foraging.
 fn fix_orphaned_returners(
-    mut query: Query<(&mut Ant, &mut PositionHistory), Without<CarriedItem>>,
+    mut query: Query<(&mut Ant, &mut PositionHistory), (Without<CarriedItem>, Without<PlayerControlled>)>,
 ) {
     for (mut ant, mut history) in &mut query {
         if ant.state == AntState::Returning {
@@ -102,7 +102,7 @@ fn ant_forage_steering(
     config: Res<SimConfig>,
     phero_grid: Option<Res<PheromoneGrid>>,
     food_query: Query<&Transform, With<FoodSource>>,
-    mut query: Query<(&Transform, &mut Movement, &Ant, &PositionHistory), Without<CarriedItem>>,
+    mut query: Query<(&Transform, &mut Movement, &Ant, &PositionHistory), (Without<CarriedItem>, Without<PlayerControlled>, Without<Follower>)>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -185,7 +185,7 @@ fn ant_return_steering(
     clock: Res<SimClock>,
     config: Res<SimConfig>,
     phero_grid: Option<Res<PheromoneGrid>>,
-    mut query: Query<(&Transform, &mut Movement, &Ant, &PositionHistory), With<CarriedItem>>,
+    mut query: Query<(&Transform, &mut Movement, &Ant, &PositionHistory), (With<CarriedItem>, Without<PlayerControlled>)>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -365,7 +365,7 @@ fn ant_pheromone_deposit(
 fn ant_movement(
     clock: Res<SimClock>,
     time: Res<Time>,
-    mut query: Query<(&mut Transform, &Movement), With<Ant>>,
+    mut query: Query<(&mut Transform, &Movement), (With<Ant>, Without<PlayerControlled>)>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -431,7 +431,7 @@ fn ant_boundary_bounce(
 
 /// Tint ants based on state: dark = foraging, green-tinted = carrying food
 fn update_ant_visuals(
-    mut query: Query<(&Ant, &mut Sprite, Option<&CarriedItem>)>,
+    mut query: Query<(&Ant, &mut Sprite, Option<&CarriedItem>), Without<PlayerControlled>>,
 ) {
     for (_ant, mut sprite, carried) in &mut query {
         if carried.is_some() {

@@ -11,6 +11,7 @@ use plugins::ant_ai::AntAiPlugin;
 use plugins::camera::CameraPlugin;
 use plugins::nest::NestPlugin;
 use plugins::pheromone::PheromonePlugin;
+use plugins::player::PlayerPlugin;
 use ui::colony_panel::ColonyPanelPlugin;
 use ui::hud::HudPlugin;
 
@@ -32,6 +33,7 @@ fn main() {
             CameraPlugin,
             NestPlugin,
             PheromonePlugin,
+            PlayerPlugin,
             ColonyPanelPlugin,
             HudPlugin,
         ))

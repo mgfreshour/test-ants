@@ -1,8 +1,9 @@
 use bevy::prelude::*;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 
-use crate::components::ant::{Ant, AntState, CarriedItem};
+use crate::components::ant::{Ant, AntState, CarriedItem, PlayerControlled};
 use crate::plugins::ant_ai::ColonyFood;
+use crate::plugins::player::{FollowerCount, PlayerMode};
 use crate::plugins::pheromone::{OverlayDisplay, OverlayState};
 use crate::resources::colony::ColonyStats;
 use crate::resources::simulation::SimClock;
@@ -43,8 +44,11 @@ fn update_hud(
     overlay: Res<OverlayState>,
     colony_food: Res<ColonyFood>,
     stats: Res<ColonyStats>,
+    player_mode: Res<PlayerMode>,
+    followers: Res<FollowerCount>,
     diagnostics: Res<DiagnosticsStore>,
     ant_query: Query<(&Ant, Option<&CarriedItem>)>,
+    player_query: Query<Option<&CarriedItem>, With<PlayerControlled>>,
     mut text_query: Query<&mut Text, With<HudText>>,
 ) {
     let Ok(mut text) = text_query.get_single_mut() else {
@@ -53,10 +57,12 @@ fn update_hud(
 
     let mut foraging = 0u32;
     let mut returning = 0u32;
+    let mut following = 0u32;
     for (ant, _carried) in &ant_query {
         match ant.state {
             AntState::Foraging => foraging += 1,
             AntState::Returning => returning += 1,
+            AntState::Following => following += 1,
             _ => {}
         }
     }
@@ -81,14 +87,25 @@ fn update_hud(
     let pop = stats.workers + stats.soldiers + stats.drones;
     let brood = stats.eggs + stats.larvae + stats.pupae;
 
+    let mode_str = if player_mode.controlling { "ANT" } else { "CAM" };
+
+    let player_carrying = player_query
+        .get_single()
+        .ok()
+        .flatten()
+        .map(|c| format!(" Carry:{:.0}", c.food_amount))
+        .unwrap_or_default();
+
     **text = format!(
-        "Pop: {} (W:{} S:{}) Brood: {} (E:{} L:{} P:{})  |  Food: {:.0}  |  Forage:{} Ret:{}  |  {}  |  Overlay:{}  |  FPS:{:.0}",
-        pop, stats.workers, stats.soldiers,
-        brood, stats.eggs, stats.larvae, stats.pupae,
+        "[{}] Pop:{} Brood:{}  |  Food:{:.0}  |  Forage:{} Ret:{} Follow:{}  |  {}  |  Overlay:{}  |  FPS:{:.0}{}\n\
+         WASD:move E:pick Q:drop Shift:trail R:recruit T:dismiss X:swap F:cam/ant",
+        mode_str,
+        pop, brood,
         colony_food.stored,
-        foraging, returning,
+        foraging, returning, following,
         clock.speed.label(),
         overlay_label,
         fps,
+        player_carrying,
     );
 }

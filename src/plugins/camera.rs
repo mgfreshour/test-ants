@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::input::mouse::MouseWheel;
 
+use crate::plugins::player::PlayerMode;
 use crate::resources::simulation::SimConfig;
 
 pub struct CameraPlugin;
@@ -38,8 +39,12 @@ const MAX_ZOOM: f32 = 5.0;
 fn camera_pan(
     input: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
+    mode: Res<PlayerMode>,
     mut query: Query<(&mut Transform, &OrthographicProjection), With<MainCamera>>,
 ) {
+    if mode.controlling {
+        return;
+    }
     let Ok((mut transform, projection)) = query.get_single_mut() else {
         return;
     };
