@@ -304,15 +304,19 @@ fn nest_utility_scoring(
         return;
     }
 
-    // Pre-compute digger/mover counts per map from the query itself before mutating.
+    // Pre-compute task counts per map from the query itself before mutating.
     let mut digger_counts: std::collections::HashMap<Entity, usize> = std::collections::HashMap::new();
     let mut mover_counts: std::collections::HashMap<Entity, usize> = std::collections::HashMap::new();
+    let mut queen_counts: std::collections::HashMap<Entity, usize> = std::collections::HashMap::new();
     for (_, _, _, m, t) in query.iter() {
         if matches!(&*t, NestTask::Dig { .. }) {
             *digger_counts.entry(m.0).or_insert(0) += 1;
         }
         if matches!(&*t, NestTask::MoveBrood { .. }) {
             *mover_counts.entry(m.0).or_insert(0) += 1;
+        }
+        if matches!(&*t, NestTask::AttendQueen { .. }) {
+            *queen_counts.entry(m.0).or_insert(0) += 1;
         }
     }
 
@@ -354,6 +358,7 @@ fn nest_utility_scoring(
 
         let current_diggers = *digger_counts.get(&map_id.0).unwrap_or(&0);
         let current_movers = *mover_counts.get(&map_id.0).unwrap_or(&0);
+        let current_queen_attendants = *queen_counts.get(&map_id.0).unwrap_or(&0);
 
         let dig_faces = nest_grid.find_dig_faces();
         let has_dig_faces = !dig_faces.is_empty();
@@ -400,10 +405,11 @@ fn nest_utility_scoring(
             0.0
         };
 
-        // Score ATTEND_QUEEN — driven by queen hunger; urgent when starving.
+        // Score ATTEND_QUEEN — driven by queen hunger; limit to ~2 attendants.
         let queen_score = if has_queen && has_food {
             let hunger_urgency = 0.3 + queen_hunger_val * 0.7; // 0.3 when full, 1.0 when starving
-            0.8 * nursing_affinity * hunger_urgency * (0.3 + queen_signal * 0.7)
+            let crowding = 1.0 / (1.0 + current_queen_attendants as f32 * 1.5);
+            0.8 * nursing_affinity * hunger_urgency * (0.3 + queen_signal * 0.7) * crowding
         } else {
             0.0
         };
@@ -894,22 +900,24 @@ fn nest_task_advance(
                         }
                     }
                     AttendStep::FeedQueen => {
-                        // Transfer food to queen — boost her satiation.
-                        if let Ok(mut hunger) = queen_hunger_query.get_single_mut() {
-                            hunger.satiation = (hunger.satiation + 1.0).min(2.0);
-                        }
+                        if at_destination {
+                            // Find our carried food (may have been lost to a race condition).
+                            let carried = carried_food_query
+                                .iter()
+                                .find(|(_, cb)| cb.0 == entity);
 
-                        // Despawn carried food entity and decrement colony food.
-                        for (food_e, carried_by) in &carried_food_query {
-                            if carried_by.0 == entity {
+                            if let Some((food_e, _)) = carried {
+                                // Transfer food to queen — boost her satiation.
+                                if let Ok(mut hunger) = queen_hunger_query.get_single_mut() {
+                                    hunger.satiation = (hunger.satiation + 1.0).min(2.0);
+                                }
                                 commands.entity(food_e).despawn();
                                 colony_food.stored -= 1.0;
-                                break;
                             }
-                        }
 
-                        *task = NestTask::Idle { timer: 0.0 };
-                        continue;
+                            *task = NestTask::Idle { timer: 0.0 };
+                            continue;
+                        }
                     }
                 }
             }
