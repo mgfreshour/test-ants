@@ -1,0 +1,19 @@
+[package]
+name = "colony"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = "0.15"
+rand = "0.8"
+
+# Enable dynamic linking for fast dev compiles (do NOT use for release builds)
+[features]
+dev = ["bevy/dynamic_linking"]
+
+# Optimize dependencies in dev for playable framerates
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
