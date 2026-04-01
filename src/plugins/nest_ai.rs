@@ -17,6 +17,7 @@ use crate::resources::nest_pheromone::{
     NestPheromoneGrid, LABEL_BROOD, LABEL_ENTRANCE, LABEL_FOOD_STORAGE, LABEL_MIDDEN, LABEL_QUEEN,
 };
 use crate::resources::simulation::{SimClock, SimSpeed};
+use crate::sim_core::nest_scoring::{choose_task, compute_scores, NestScoringInput, NestTaskChoice};
 
 pub struct NestAiPlugin;
 
@@ -408,50 +409,8 @@ fn nest_utility_scoring(
             (0.0, 0.0)
         };
 
-        // Age-based affinity (temporal polyethism).
-        let age_frac = (ant.age / 300.0).clamp(0.0, 1.0);
-        let nursing_affinity = 1.0 - age_frac * 0.8;
-        let hauling_affinity = 0.3 + age_frac * 0.7;
-        let digging_affinity = if age_frac > 0.15 && age_frac < 0.6 { 1.2 } else { 0.4 };
-        let has_food = colony_food.stored > 0.5;
-
-        // Score FEED_LARVA
-        let feed_score = if unfed_larvae > 0 && has_food {
-            let need = (unfed_larvae as f32 / 5.0).min(1.0);
-            need * nursing_affinity * (0.3 + brood_need * 0.7)
-        } else {
-            0.0
-        };
-
-        // Score MOVE_BROOD — relocate eggs/larvae from queen chamber to brood chamber.
-        let move_brood_score = if unrelocated_brood > 0 {
-            let urgency = (unrelocated_brood as f32 / 3.0).min(1.0);
-            // Limit to ~2 movers at a time.
-            let crowding = 1.0 / (1.0 + current_movers as f32 * 0.8);
-            urgency * nursing_affinity * 0.7 * crowding
-        } else {
-            0.0
-        };
-
-        // Score HAUL_FOOD — haul when there's food deposited worth moving.
-        let haul_score = if colony_food.stored > 1.0 {
-            0.5 * hauling_affinity
-        } else {
-            0.0
-        };
-
-        // Score ATTEND_QUEEN — driven by queen hunger; limit to ~2 attendants.
-        let queen_score = if has_queen && has_food {
-            let hunger_urgency = 0.3 + queen_hunger_val * 0.7; // 0.3 when full, 1.0 when starving
-            let crowding = 1.0 / (1.0 + current_queen_attendants as f32 * 1.5);
-            0.8 * nursing_affinity * hunger_urgency * (0.3 + queen_signal * 0.7) * crowding
-        } else {
-            0.0
-        };
-
-        // Score DIG_AT_FACE — use pheromone at nearest dig face, not ant position.
-        let dig_score = if has_dig_faces {
-            let nearest_face_construction = if let Some(gp) = grid_pos {
+        let nearest_face_construction = if has_dig_faces {
+            if let Some(gp) = grid_pos {
                 dig_faces
                     .iter()
                     .min_by_key(|&&(fx, fy)| {
@@ -463,54 +422,52 @@ fn nest_utility_scoring(
                     .unwrap_or(0.0)
             } else {
                 0.0
-            };
-
-            let stigmergic = 0.3 + nearest_face_construction * 0.7;
-            let player_boost = dig_zones_opt
-                .map_or(false, |dz| !dz.cells.is_empty())
-                .then_some(0.4)
-                .unwrap_or(0.0);
-            // Self-limiting: more diggers already assigned → lower score for new recruits.
-            let crowding_penalty = 1.0 / (1.0 + current_diggers as f32 * 0.3);
-
-            (stigmergic + player_boost + expansion_need).min(1.0) * digging_affinity * crowding_penalty
+            }
         } else {
             0.0
         };
 
-        // Score IDLE
-        let idle_score = 0.05;
+        let scoring_input = NestScoringInput {
+            unfed_larvae,
+            unrelocated_brood,
+            has_food: colony_food.stored > 0.5,
+            colony_food_stored: colony_food.stored,
+            has_queen,
+            queen_hunger: queen_hunger_val,
+            brood_need,
+            queen_signal,
+            nearest_face_construction,
+            has_dig_faces,
+            has_player_dig_zones: dig_zones_opt.map_or(false, |dz| !dz.cells.is_empty()),
+            expansion_need,
+            current_diggers,
+            current_movers,
+            current_queen_attendants,
+            ant_age: ant.age,
+        };
+        let choice = choose_task(&compute_scores(&scoring_input));
 
-        // Pick highest scoring action.
-        let scores = [feed_score, move_brood_score, haul_score, queen_score, dig_score, idle_score];
-        let max_score = scores.iter().cloned().fold(0.0f32, f32::max);
-
-        *task = if max_score == move_brood_score && move_brood_score > 0.0 {
-            NestTask::MoveBrood {
+        *task = match choice {
+            NestTaskChoice::MoveBrood => NestTask::MoveBrood {
                 step: MoveBroodStep::GoToQueen,
                 target_brood: None,
-            }
-        } else if max_score == feed_score && feed_score > 0.0 {
-            NestTask::FeedLarva {
+            },
+            NestTaskChoice::FeedLarva => NestTask::FeedLarva {
                 step: FeedStep::GoToStorage,
                 target_larva: None,
-            }
-        } else if max_score == dig_score && dig_score > 0.0 {
-            NestTask::Dig {
+            },
+            NestTaskChoice::Dig => NestTask::Dig {
                 step: DigStep::GoToFace,
                 target_cell: None,
                 dig_timer: 0.0,
-            }
-        } else if max_score == haul_score && haul_score > 0.0 {
-            NestTask::HaulFood {
+            },
+            NestTaskChoice::HaulFood => NestTask::HaulFood {
                 step: HaulStep::GoToEntrance,
-            }
-        } else if max_score == queen_score && queen_score > 0.0 {
-            NestTask::AttendQueen {
+            },
+            NestTaskChoice::AttendQueen => NestTask::AttendQueen {
                 step: AttendStep::GoToStorage,
-            }
-        } else {
-            NestTask::Idle { timer: 0.0 }
+            },
+            NestTaskChoice::Idle => NestTask::Idle { timer: 0.0 },
         };
     }
 }

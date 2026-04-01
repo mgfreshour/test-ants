@@ -4,6 +4,7 @@
 //! tested without Bevy ECS world setup, rendering components, or UI concerns.
 
 pub mod ant_logic;
+pub mod nest_scoring;
 
 /// Scale frame delta seconds by a simulation speed multiplier.
 ///
