@@ -186,4 +186,25 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn invariant_hunger_step_outputs_are_bounded() {
+        for hunger in [0.0, 0.2, 0.5, 0.9, 1.0] {
+            for dt in [0.0, 0.1, 1.0, 3.0] {
+                let (next_hunger, hp_loss) =
+                    hunger_tick_step(hunger, dt, 0.02, Some(1.0), 0.5, 0.4, 0.5);
+                assert!((0.0..=1.0).contains(&next_hunger));
+                assert!(hp_loss >= 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn invariant_pickup_amount_is_never_negative() {
+        for remaining in [-2.0, -0.1, 0.0, 0.2, 3.7, 9.0] {
+            let picked = pickup_food_amount(remaining, 5.0).unwrap_or(0.0);
+            assert!(picked >= 0.0);
+            assert!(picked <= 5.0);
+        }
+    }
 }

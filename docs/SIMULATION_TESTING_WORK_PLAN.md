@@ -54,7 +54,7 @@ Do not test:
         Why: ensures assignment logic remains explainable and tunable.
 13. [x] **W13 (P1/L)** Add unit tests for nest task progression sub-steps (`Feed`, `MoveBrood`, `Haul`, `Dig`, `Attend`).  
         Why: protects high-complexity behavior chains with many edge cases.
-14. [ ] **W14 (P2/M)** Add property-style tests for invariants (no invalid states, bounded values, no negative food).  
+14. [x] **W14 (P2/M)** Add property-style tests for invariants (no invalid states, bounded values, no negative food).  
         Why: catches broad classes of logic bugs early.
 15. [ ] **W15 (P2/M)** Add integration tests with `bevy::app::App` for minimal end-to-end sim ticks (headless).  
         Why: validates ECS wiring while keeping display assertions out of scope.
