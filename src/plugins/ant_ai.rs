@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::ant::{Ant, AntJob, AntState, CarriedItem, ColonyMember, Health, Movement, PlayerControlled, PositionHistory, TrailSense};
+use crate::components::ant::{Ant, AntJob, AntState, CarriedItem, ColonyMember, Health, Movement, PlayerControlled, PositionHistory, SteeringTarget, SteeringWeights, TrailSense};
 use crate::components::map::{MapId, MapMarker, MapPortal};
 use crate::components::nest::FoodEntity;
 
@@ -92,6 +92,8 @@ fn spawn_initial_ants(mut commands: Commands, config: Res<SimConfig>, registry: 
             PositionHistory::default(),
             TrailSense::default(),
             MapId(registry.surface),
+            SteeringTarget::default(),
+            SteeringWeights::default(),
         ));
     }
 }

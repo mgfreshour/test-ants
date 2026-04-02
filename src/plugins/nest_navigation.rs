@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::components::ant::SteeringTarget;
 use crate::components::map::{MapId, MapKind, MapMarker};
 use crate::components::nest::{NestPath, NestTask};
 use crate::resources::active_map::viewing_nest;
@@ -20,12 +21,36 @@ impl Plugin for NestNavigationPlugin {
         app.init_resource::<NestDebugPaths>()
             .add_systems(
                 Update,
-                nest_path_following,
+                (
+                    convert_nest_paths_to_steering,
+                    nest_path_following,
+                )
+                    .chain(),
             )
             .add_systems(
                 Update,
                 update_debug_path_lines.run_if(viewing_nest),
             );
+    }
+}
+
+/// Convert NestPath waypoints to SteeringTarget for unified steering system.
+/// This system updates the SteeringTarget component with the waypoint list from NestPath.
+fn convert_nest_paths_to_steering(
+    mut query: Query<(&NestPath, &mut SteeringTarget), With<NestTask>>,
+) {
+    for (path, mut target) in &mut query {
+        // Convert grid waypoints to world coordinates
+        let world_waypoints: Vec<Vec2> = path
+            .waypoints
+            .iter()
+            .map(|&(gx, gy)| nest_grid_to_world(gx, gy))
+            .collect();
+
+        *target = SteeringTarget::Path {
+            waypoints: world_waypoints,
+            index: path.current_index,
+        };
     }
 }
 

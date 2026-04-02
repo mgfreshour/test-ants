@@ -60,6 +60,41 @@ pub struct Movement {
     pub direction: Vec2,
 }
 
+/// Steering target abstraction for unified movement system
+#[derive(Component, Debug, Clone)]
+pub enum SteeringTarget {
+    /// No steering (idle ant)
+    None,
+    /// Direction-based steering: seek toward pre-computed target direction
+    Direction { target: Vec2 },
+    /// Path-based steering: follow waypoint sequence
+    Path { waypoints: Vec<Vec2>, index: usize },
+}
+
+impl Default for SteeringTarget {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+/// Steering behavior weights as a component
+#[derive(Component, Debug, Clone, Copy)]
+pub struct SteeringWeights {
+    pub seek_weight: f32,           // Target seeking strength
+    pub separation_weight: f32,     // Collision avoidance strength
+    pub forward_weight: f32,        // Momentum preservation
+}
+
+impl Default for SteeringWeights {
+    fn default() -> Self {
+        Self {
+            seek_weight: 1.0,
+            separation_weight: 0.5,
+            forward_weight: 0.6,
+        }
+    }
+}
+
 #[derive(Component)]
 pub struct Health {
     pub current: f32,

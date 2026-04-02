@@ -10,6 +10,7 @@ pub mod nest_scoring;
 pub mod nest_transitions;
 pub mod regressions;
 pub mod rng;
+pub mod steering;
 #[cfg(test)]
 pub mod test_fixtures;
 

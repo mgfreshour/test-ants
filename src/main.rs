@@ -20,6 +20,7 @@ use plugins::combat::CombatPlugin;
 use plugins::egui_ui::EguiUiPlugin;
 use plugins::pheromone::PheromonePlugin;
 use plugins::player::PlayerPlugin;
+use plugins::steering::SteeringPlugin;
 use ui::hud::HudPlugin;
 
 fn main() {
@@ -45,6 +46,7 @@ fn main() {
             NestNavigationPlugin,
             PheromonePlugin,
             PlayerPlugin,
+            SteeringPlugin,
             CombatPlugin,
             EguiUiPlugin,
             HudPlugin,

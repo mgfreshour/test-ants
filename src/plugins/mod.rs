@@ -11,3 +11,4 @@ pub mod nest_navigation;
 pub mod nest_pheromone;
 pub mod pheromone;
 pub mod player;
+pub mod steering;

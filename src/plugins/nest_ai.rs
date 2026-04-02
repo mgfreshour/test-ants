@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::ant::{Ant, AntJob, AntState, ColonyMember, Health, PlayerControlled, Underground};
+use crate::components::ant::{Ant, AntJob, AntState, ColonyMember, Health, Movement, PlayerControlled, PositionHistory, SteeringTarget, SteeringWeights, Underground};
 use crate::components::map::{MapId, MapKind, MapMarker, MapPortal, PORTAL_RANGE};
 use crate::components::nest::{
     AttendStep, Brood, BroodStage, CarriedBy, CellType, ChamberKind, DigStep, FeedStep, FoodEntity,
@@ -260,6 +260,10 @@ fn spawn_initial_nest_ants(
                 ColonyMember { colony_id: *colony_id },
                 MapId(map_entity),
                 NestTask::Idle { timer: 0.0 },
+                Movement { speed: 20.0, direction: Vec2::ZERO },
+                PositionHistory::default(),
+                SteeringTarget::default(),
+                SteeringWeights::default(),
             ));
         }
     }
