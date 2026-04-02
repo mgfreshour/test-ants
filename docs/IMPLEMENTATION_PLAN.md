@@ -21,7 +21,7 @@ Sprint  9   █████████░░░░░░░░░░░░░  
 Sprint 10   ██████████░░░░░░░░░░░░  Colony Management UI ✓
 Sprint 11   ███████████░░░░░░░░░░░  Player HUD & Action Bar ✓
 Sprint 12   ████████████░░░░░░░░░░  Spawn at Egg Location
-Sprint 13   █████████████░░░░░░░░░  AntJob Component
+Sprint 13   ██████████████░░░░░░░░░  AntJob Component ✓
 Sprint 14   ██████████████░░░░░░░░  Job-Driven Transitions
 Sprint 15   ███████████████░░░░░░░  Unified Steering
 Sprint 16   ████████████████░░░░░░  Split AI Files
@@ -106,42 +106,45 @@ Brood hatches into ants at the pupa's world position instead of teleporting to t
 
 ---
 
-## Sprint 13: AntJob Component + Job Assignment (Weeks 25-26)
+## Sprint 13: AntJob Component + Job Assignment ✓ (Weeks 25-26)
 
 ### Goal
 Every ant gets a persistent `AntJob` tag. A global system enforces `BehaviorSliders` ratios using age-based polyethism. This sprint is behavior-neutral — `AntJob` is attached but nothing reads it yet (besides the assignment system).
 
 ### Tasks
 
-| # | Task | Est |
-|---|---|---|
-| 13.1 | Add `AntJob` enum component (Forager/Nurse/Digger/Defender/Unassigned) | 2h |
-| 13.2 | Create `sim_core/job_assignment.rs` — pure logic for ratio computation, job selection | 4h |
-| 13.3 | Add `AntJob` to `spawn_initial_nest_ants` | 1h |
-| 13.4 | Add `AntJob` to `brood_development` spawn (Sprint 12 output) | 1h |
-| 13.5 | Extend `BehaviorSliders` if needed | 1h |
-| 13.6 | `job_assignment_system` — runs every ~3s, rebalances jobs per colony | 5h |
-| 13.7 | Age-based affinity (young→Nurse, mid→Digger, old→Forager/Defender) | 3h |
-| 13.8 | Hysteresis band (±5%) to prevent oscillation | 2h |
-| 13.9 | Unit tests for ratio math, age affinity, hysteresis | 4h |
+| # | Task | Est | Status |
+|---|---|---|---|
+| 13.1 | Add `AntJob` enum component (Forager/Nurse/Digger/Defender/Unassigned) | 2h | ✓ |
+| 13.2 | Create `sim_core/job_assignment.rs` — pure logic for ratio computation, job selection | 4h | ✓ |
+| 13.3 | Add `AntJob` to `spawn_initial_nest_ants` | 1h | ✓ |
+| 13.4 | Add `AntJob` to `brood_development` spawn (Sprint 12 output) | 1h | ✓ |
+| 13.5 | Extend `BehaviorSliders` if needed | 1h | ✓ (no changes needed) |
+| 13.6 | `job_assignment_system` — runs every ~3s, rebalances jobs per colony | 5h | ✓ |
+| 13.7 | Age-based affinity (young→Nurse, mid→Digger, old→Forager/Defender) | 3h | ✓ |
+| 13.8 | Hysteresis band (±5%) to prevent oscillation | 2h | ✓ |
+| 13.9 | Unit tests for ratio math, age affinity, hysteresis | 4h | ✓ (8 tests) |
 
 ### Demo
-> Open colony panel, adjust behavior sliders. Switch to nest view, toggle debug labels — each ant now shows a job letter (F/N/D/I). Adjust the "Forage" slider up — after a few seconds, more ants switch to Forager job. Young ants cluster in Nurse jobs, old ants in Forager. Existing AI continues using `NestTask`/`AntState` as before — no behavior changes yet.
+> Ants now have persistent AntJob components. Every 3 seconds, the job_assignment_system rebalances colony workforce. Adjust "Forage" slider up — over the next few seconds, more Unassigned/Nurse ants transition to Forager as the system rebalances. Young ants cluster in Nurse jobs (high nursing affinity), old ants prefer Forager (high forager affinity). Middle-aged ants stay in Digger/intermediate roles. Existing AI behavior unchanged (still uses NestTask/AntState for decisions).
 
 ### Acceptance Criteria
-- [ ] `AntJob` component on all ants
-- [ ] Job assignment system rebalances ants to match sliders
-- [ ] Age-based affinity creates generational division
-- [ ] Hysteresis prevents rapid oscillation
-- [ ] Pure logic tests pass
-- [ ] No behavior changes (existing AI unchanged)
+- [x] `AntJob` component on all ants
+- [x] Job assignment system rebalances ants to match sliders every 3s
+- [x] Age-based affinity creates generational division
+- [x] Hysteresis prevents rapid oscillation (±5% band)
+- [x] Pure logic tests pass (8 tests all green)
+- [x] No behavior changes (all 74 tests pass, runtime validation succeeds)
 
 **Files touched**:
-- `src/components/ant.rs` — `AntJob` enum
-- `src/sim_core/job_assignment.rs` (new) — pure logic
-- `src/plugins/nest_ai.rs` — `job_assignment_system`
-- `src/plugins/nest.rs` — add `AntJob` to spawn
-- `src/resources/colony.rs` — extend `BehaviorSliders` if needed
+- `src/components/ant.rs` — `AntJob` enum (Forager/Nurse/Digger/Defender/Unassigned)
+- `src/sim_core/job_assignment.rs` (new, 357 lines) — pure logic with compute_job_affinity, should_reassign_ant, find_best_job
+- `src/plugins/nest_ai.rs` — `job_assignment_system`, `JobAssignmentTimer` resource
+- `src/plugins/nest.rs` — add `AntJob::Unassigned` to brood_development spawn
+- `src/plugins/ant_ai.rs` — add `AntJob::Unassigned` to spawn_initial_ants
+- `src/sim_core/mod.rs` — export job_assignment module
+
+**Commit**: e8c7571 ("feat: Sprint 13 - AntJob component and job assignment system")
 
 ---
 
