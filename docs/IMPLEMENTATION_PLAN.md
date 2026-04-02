@@ -315,7 +315,7 @@ The player can directly control one ant (yellow highlight), pick up food, lay ph
 - [x] R recruits nearby ants, T dismisses them
 - [x] X exchanges to a different ant
 - [x] Camera follow mode tracks player ant smoothly
-- [ ] Player HUD shows HP, hunger, carried item, follower count
+- [x] Player HUD shows HP, hunger, carried item, follower count
 - [x] Player attack (Space key) — combat.rs:298
 - [x] Regurgitate food to adjacent nestmate (F key) + hunger system
 
@@ -351,10 +351,10 @@ A rival red colony exists on the map. Red and black ants fight on contact. Spide
 - [x] Damage, HP, death all work correctly
 - [x] Alarm pheromone recruits defenders to combat zones
 - [x] Spider kills lone ants, can be killed by groups
-- [ ] Antlion traps work
+- [x] Antlion traps work
 - [x] Killing enemy queen triggers victory; losing yours triggers defeat
-- [ ] Red colony AI has strategy layer (aggression curve, raid timing)
-- [ ] Combat visual effects (hit flash, damage numbers)
+- [x] Red colony AI has strategy layer (aggression curve, raid timing)
+- [x] Combat visual effects (hit flash, damage numbers)
 
 ---
 

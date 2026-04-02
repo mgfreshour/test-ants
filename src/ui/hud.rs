@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 
-use crate::components::ant::{Ant, AntState, CarriedItem, PlayerControlled};
+use crate::components::ant::{Ant, AntState, CarriedItem, Health, PlayerControlled};
 use crate::components::map::MapMarker;
 use crate::plugins::ant_ai::ColonyFood;
 use crate::plugins::player::{FollowerCount, PlayerMode, RecruitMode};
@@ -53,7 +53,7 @@ fn update_hud(
     food_query: Query<&ColonyFood, With<MapMarker>>,
     diagnostics: Res<DiagnosticsStore>,
     ant_query: Query<(&Ant, Option<&CarriedItem>)>,
-    player_query: Query<Option<&CarriedItem>, With<PlayerControlled>>,
+    player_query: Query<(&Ant, &Health, Option<&CarriedItem>), With<PlayerControlled>>,
     mut text_query: Query<&mut Text, With<HudText>>,
 ) {
     let Ok(mut text) = text_query.get_single_mut() else {
@@ -114,12 +114,20 @@ fn update_hud(
 
             let mode_str = if player_mode.controlling { "ANT" } else { "CAM" };
 
-            let player_carrying = player_query
-                .get_single()
-                .ok()
-                .flatten()
-                .map(|c| format!(" Carry:{:.0}", c.food_amount))
-                .unwrap_or_default();
+            let player_stats = if let Ok((ant, health, carried)) = player_query.get_single() {
+                let carry_str = carried
+                    .map(|c| format!(" Carry:{:.0}", c.food_amount))
+                    .unwrap_or_default();
+                format!(
+                    "  |  HP:{:.0}/{:.0} Hunger:{:.0}%{} Followers:{}",
+                    health.current, health.max,
+                    ant.hunger * 100.0,
+                    carry_str,
+                    _followers.0,
+                )
+            } else {
+                String::new()
+            };
 
             **text = format!(
                 "[{}] Pop:{} Brood:{}  |  Food:{:.0}  |  Forage:{} Ret:{} Follow:{} Atk:{}  |  {}  |  Overlay:{}  |  FPS:{:.0}{}\n\
@@ -131,7 +139,7 @@ fn update_hud(
                 clock.speed.label(),
                 overlay_label,
                 fps,
-                player_carrying,
+                player_stats,
                 recruit_mode.label(),
             );
         }

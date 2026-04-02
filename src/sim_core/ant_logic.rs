@@ -110,6 +110,21 @@ pub fn post_combat_state(attack_recruit_intensity: f32, signal_threshold: f32) -
     }
 }
 
+/// Compute red colony aggression level based on elapsed time.
+/// Starts defensive (0.1), ramps linearly to max (0.9) over `ramp_duration` seconds.
+pub fn red_aggression_curve(elapsed: f32, ramp_duration: f32) -> f32 {
+    let t = (elapsed / ramp_duration).clamp(0.0, 1.0);
+    0.1 + t * 0.8
+}
+
+/// Whether the red colony should launch a raid based on aggression and a timer.
+/// Returns true when enough time has passed since the last raid attempt.
+pub fn should_raid(aggression: f32, time_since_last_raid: f32, base_raid_interval: f32) -> bool {
+    // Higher aggression → shorter raid intervals.
+    let interval = base_raid_interval * (1.0 - aggression * 0.7);
+    time_since_last_raid >= interval
+}
+
 pub fn apply_boundary_bounce(pos: Vec2, dir: Vec2, min: Vec2, max: Vec2) -> (Vec2, Vec2) {
     let mut next_pos = pos;
     let mut next_dir = dir;
@@ -249,6 +264,44 @@ mod tests {
         assert_eq!(post_combat_state(0.5, 0.4), "attacking");
         assert_eq!(post_combat_state(0.3, 0.4), "foraging");
         assert_eq!(post_combat_state(0.4, 0.4), "attacking");
+    }
+
+    #[test]
+    fn red_aggression_starts_low() {
+        let a = red_aggression_curve(0.0, 300.0);
+        assert!((a - 0.1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn red_aggression_ramps_to_max() {
+        let a = red_aggression_curve(300.0, 300.0);
+        assert!((a - 0.9).abs() < 1e-6);
+    }
+
+    #[test]
+    fn red_aggression_clamps_beyond_ramp() {
+        let a = red_aggression_curve(600.0, 300.0);
+        assert!((a - 0.9).abs() < 1e-6);
+    }
+
+    #[test]
+    fn red_aggression_midpoint() {
+        let a = red_aggression_curve(150.0, 300.0);
+        assert!((a - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn should_raid_respects_interval() {
+        // Low aggression → interval barely reduced.
+        assert!(!should_raid(0.1, 50.0, 60.0));
+        assert!(should_raid(0.1, 60.0, 60.0));
+    }
+
+    #[test]
+    fn should_raid_high_aggression_shortens_interval() {
+        // aggression 0.9 → interval = 60 * (1 - 0.63) = 60 * 0.37 = 22.2
+        assert!(should_raid(0.9, 23.0, 60.0));
+        assert!(!should_raid(0.9, 20.0, 60.0));
     }
 
     #[test]
