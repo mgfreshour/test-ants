@@ -5,6 +5,7 @@
 
 pub mod ant_logic;
 pub mod clock;
+pub mod job_assignment;
 pub mod nest_scoring;
 pub mod nest_transitions;
 pub mod regressions;

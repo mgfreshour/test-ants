@@ -22,6 +22,18 @@ pub enum AntState {
     Attacking,
 }
 
+/// Persistent job assignment. Determines role within the colony.
+/// Sprint 13 foundation: attached to all ants, maintained by job_assignment_system.
+/// Read by AI systems starting in Sprint 17.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AntJob {
+    Forager,
+    Nurse,
+    Digger,
+    Defender,
+    Unassigned,
+}
+
 #[derive(Component)]
 pub struct Ant {
     pub caste: Caste,
