@@ -103,6 +103,8 @@ fn colony_management_panel(
     mut aggression: ResMut<AggressionSettings>,
     mut overlay_state: ResMut<OverlayState>,
     mut nest_overlay_state: ResMut<NestPheromoneOverlayState>,
+    env: Res<crate::plugins::environment::EnvironmentState>,
+    mut hazard_writer: MessageWriter<crate::plugins::environment::HazardEvent>,
     food_query: Query<&ColonyFood, With<MapMarker>>,
     mut sliders_query: Query<&mut BehaviorSliders, With<MapMarker>>,
     underground_count: Query<&NestTask>,
@@ -241,6 +243,42 @@ fn colony_management_panel(
                     .on_hover_text("How far defenders roam from the nest entrance");
                 ui.add(egui::Slider::new(&mut aggression.alarm_threshold, 0.1..=5.0).text("Alarm Threshold"))
                     .on_hover_text("Pheromone intensity required to trigger defender response");
+            });
+            ui.separator();
+
+            // -- Environment Controls
+            ui.collapsing("Environment", |ui| {
+                ui.label(format!("Time of Day: {:.1}h", env.time_of_day * 24.0));
+
+                if env.is_raining {
+                    ui.colored_label(egui::Color32::from_rgb(100, 150, 255), "🌧 RAINING");
+                } else {
+                    ui.colored_label(egui::Color32::from_rgb(200, 200, 100), "☀ Clear");
+                }
+
+                if env.flood_level > 0.0 {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(50, 100, 200),
+                        format!("Flood Level: {:.1}%", env.flood_level * 100.0)
+                    );
+                }
+
+                ui.separator();
+                ui.label("Trigger Event:");
+                ui.horizontal(|ui| {
+                    if ui.button("☔ Rain").clicked() {
+                        hazard_writer.write(crate::plugins::environment::HazardEvent::TriggerRain);
+                    }
+                    if ui.button("👣 Footstep").clicked() {
+                        hazard_writer.write(crate::plugins::environment::HazardEvent::TriggerFootstep);
+                    }
+                    if ui.button("🔪 Mower").clicked() {
+                        hazard_writer.write(crate::plugins::environment::HazardEvent::TriggerLawnmower);
+                    }
+                    if ui.button("☠️ Spray").clicked() {
+                        hazard_writer.write(crate::plugins::environment::HazardEvent::TriggerPesticide);
+                    }
+                });
             });
             ui.separator();
 

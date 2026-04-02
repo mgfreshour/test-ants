@@ -8,14 +8,24 @@ use crate::plugins::player::ToastQueue;
 /// Environment hazards and dynamic events: rain, flooding, footsteps, lawnmower, pesticide, day/night.
 pub struct EnvironmentPlugin;
 
+/// Message to trigger a hazard event manually.
+#[derive(Message)]
+pub enum HazardEvent {
+    TriggerRain,
+    TriggerFootstep,
+    TriggerLawnmower,
+    TriggerPesticide,
+}
+
 impl Plugin for EnvironmentPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(EnvironmentState::default())
             .add_systems(Update, (
+                handle_manual_hazards,
                 update_day_night_cycle,
                 update_rain_state,
                 update_hazard_events,
-            ));
+            ).chain());
     }
 }
 
@@ -115,6 +125,61 @@ fn update_rain_state(
     // Drain flood level gradually
     if !env.is_raining && env.flood_level > 0.0 {
         env.flood_level = (env.flood_level - delta * 0.1).max(0.0);
+    }
+}
+
+/// Handle manually triggered hazard events from UI.
+fn handle_manual_hazards(
+    mut env: ResMut<EnvironmentState>,
+    mut events: MessageReader<HazardEvent>,
+    mut toasts: ResMut<ToastQueue>,
+) {
+    for event in events.read() {
+        match event {
+            HazardEvent::TriggerRain => {
+                env.is_raining = true;
+                env.evaporation_multiplier = 10.0;
+                env.flood_level = 0.0;
+                env.rain_timer = 60.0;
+                toasts.push("Rain triggered!".to_string());
+            }
+            HazardEvent::TriggerFootstep => {
+                let pos = Vec2::new(
+                    rand::thread_rng().gen_range(50.0..1230.0),
+                    rand::thread_rng().gen_range(50.0..670.0),
+                );
+                env.active_hazards.push(HazardZone {
+                    position: pos,
+                    radius: 30.0,
+                    damage_per_tick: 999.0,
+                    remaining_time: 0.5,
+                });
+                toasts.push("Footstep!".to_string());
+            }
+            HazardEvent::TriggerLawnmower => {
+                let y = rand::thread_rng().gen_range(100.0..650.0);
+                env.active_hazards.push(HazardZone {
+                    position: Vec2::new(640.0, y),
+                    radius: 60.0,
+                    damage_per_tick: 999.0,
+                    remaining_time: 3.0,
+                });
+                toasts.push("Lawnmower!".to_string());
+            }
+            HazardEvent::TriggerPesticide => {
+                let pos = Vec2::new(
+                    rand::thread_rng().gen_range(100.0..1180.0),
+                    rand::thread_rng().gen_range(100.0..620.0),
+                );
+                env.active_hazards.push(HazardZone {
+                    position: pos,
+                    radius: 50.0,
+                    damage_per_tick: 5.0,
+                    remaining_time: 30.0,
+                });
+                toasts.push("Pesticide spray!".to_string());
+            }
+        }
     }
 }
 
