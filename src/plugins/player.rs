@@ -205,11 +205,7 @@ fn player_portal_transition(
         if portal.map != player_map.0 {
             continue;
         }
-        if let Some(required) = portal.colony_id {
-            if colony.colony_id != required {
-                continue;
-            }
-        }
+        // Player can enter any portal regardless of colony restriction.
         if player_pos.distance(portal.position) <= PORTAL_RANGE {
             found_portal = Some(portal);
             break;

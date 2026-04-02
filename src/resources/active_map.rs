@@ -31,8 +31,21 @@ pub struct MapRegistry {
     pub surface: Entity,
     /// The player colony's underground nest.
     pub player_nest: Entity,
+    /// The red (enemy) colony's underground nest, if present.
+    pub red_nest: Option<Entity>,
     /// All maps in cycle order (surface first, then nests in colony_id order).
     pub maps: Vec<Entity>,
+}
+
+impl MapRegistry {
+    /// Look up the nest entity for a given colony_id.
+    pub fn nest_for_colony(&self, colony_id: u32) -> Option<Entity> {
+        match colony_id {
+            0 => Some(self.player_nest),
+            1 => self.red_nest,
+            _ => None,
+        }
+    }
 }
 
 /// Per-map saved camera state, keyed by map entity.

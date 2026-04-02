@@ -88,8 +88,6 @@ fn setup_maps(mut commands: Commands, config: Res<SimConfig>) {
     )).id();
 
     // Portal pair: surface nest entrance ↔ underground entrance cell.
-    // Surface position = SimConfig.nest_position.
-    // Underground position = top of the entrance tunnel (column cx, first passable row).
     let cx = NEST_WIDTH / 2;
     let underground_entrance = nest_grid_to_world(cx, 0);
     spawn_portal_pair(
@@ -101,11 +99,41 @@ fn setup_maps(mut commands: Commands, config: Res<SimConfig>) {
         Some(0), // only player colony (id=0)
     );
 
+    // Red colony nest — identical layout, AI-controlled sliders.
+    let red_nest_grid = NestGrid::default();
+    let mut red_phero_grid = NestPheromoneGrid::default();
+    red_phero_grid.seed_from_grid(&red_nest_grid);
+
+    let red_nest = commands.spawn((
+        MapMarker,
+        MapKind::Nest { colony_id: 1 },
+        red_nest_grid,
+        red_phero_grid,
+        NestPathCache::default(),
+        ColonyFood { stored: 20.0 }, // starting food so queen survives early
+        BehaviorSliders { forage: 0.5, nurse: 0.25, dig: 0.15, defend: 0.1 },
+        crate::resources::nest::TileStackRegistry::default(),
+    )).id();
+
+    let red_nest_surface_pos = Vec2::new(
+        config.world_width - config.nest_position.x,
+        config.world_height - config.nest_position.y,
+    );
+    spawn_portal_pair(
+        &mut commands,
+        surface,
+        red_nest_surface_pos,
+        red_nest,
+        underground_entrance, // same grid layout, different map entity
+        Some(1), // only red colony NPCs (id=1)
+    );
+
     commands.insert_resource(ActiveMap { entity: surface, kind: MapKind::Surface });
     commands.insert_resource(MapRegistry {
         surface,
         player_nest,
-        maps: vec![surface, player_nest],
+        red_nest: Some(red_nest),
+        maps: vec![surface, player_nest, red_nest],
     });
     commands.insert_resource(SavedCameraStates::default());
 }
@@ -114,45 +142,60 @@ fn setup_maps(mut commands: Commands, config: Res<SimConfig>) {
 
 fn render_nest(
     mut commands: Commands,
-    registry: Res<MapRegistry>,
-    map_query: Query<&NestGrid, With<MapMarker>>,
+    map_query: Query<(Entity, &NestGrid), With<MapMarker>>,
 ) {
-    let Ok(grid) = map_query.get(registry.player_nest) else { return };
+    for (map_entity, grid) in &map_query {
+        for y in 0..grid.height {
+            for x in 0..grid.width {
+                let cell = grid.get(x, y);
+                let w = nest_grid_to_world(x, y);
 
-    for y in 0..grid.height {
-        for x in 0..grid.width {
-            let cell = grid.get(x, y);
-            let w = nest_grid_to_world(x, y);
-
-            commands.spawn((
-                Sprite {
-                    color: cell.color(),
-                    custom_size: Some(Vec2::splat(NEST_CELL_SIZE)),
-                    ..default()
-                },
-                Transform::from_xyz(w.x, w.y, 0.0),
-                Visibility::Hidden,
-                NestTile { grid_x: x, grid_y: y },
-                MapId(registry.player_nest),
-            ));
+                commands.spawn((
+                    Sprite {
+                        color: cell.color(),
+                        custom_size: Some(Vec2::splat(NEST_CELL_SIZE)),
+                        ..default()
+                    },
+                    Transform::from_xyz(w.x, w.y, 0.0),
+                    Visibility::Hidden,
+                    NestTile { grid_x: x, grid_y: y },
+                    MapId(map_entity),
+                ));
+            }
         }
     }
 }
 
-fn spawn_queen(mut commands: Commands, registry: Res<MapRegistry>, mut meshes: ResMut<Assets<Mesh>>, mut materials: ResMut<Assets<ColorMaterial>>) {
+fn spawn_queen(
+    mut commands: Commands,
+    map_query: Query<(Entity, &MapKind), With<MapMarker>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
     let cx = NEST_WIDTH / 2;
     let queen_center = nest_grid_to_world(cx, 16);
 
-    commands.spawn((
-        Mesh2d(meshes.add(Circle::new(6.0))),
-        MeshMaterial2d(materials.add(ColorMaterial::from(Color::srgb(0.8, 0.6, 0.1)))),
-        Transform::from_xyz(queen_center.x, queen_center.y, 3.0),
-        Visibility::Hidden,
-        Queen,
-        QueenHunger::default(),
-        MapId(registry.player_nest),
-        Health { current: 100.0, max: 100.0 },
-    ));
+    for (map_entity, kind) in &map_query {
+        let MapKind::Nest { colony_id } = kind else { continue };
+
+        let color = if *colony_id == 0 {
+            Color::srgb(0.8, 0.6, 0.1) // gold
+        } else {
+            Color::srgb(0.8, 0.2, 0.1) // red-gold
+        };
+
+        commands.spawn((
+            Mesh2d(meshes.add(Circle::new(6.0))),
+            MeshMaterial2d(materials.add(ColorMaterial::from(color))),
+            Transform::from_xyz(queen_center.x, queen_center.y, 3.0),
+            Visibility::Hidden,
+            Queen,
+            QueenHunger::default(),
+            ColonyMember { colony_id: *colony_id },
+            MapId(map_entity),
+            Health { current: 100.0, max: 100.0 },
+        ));
+    }
 }
 
 // ── View cycling ─────────────────────────────────────────────────────
@@ -246,51 +289,48 @@ fn queen_hunger_decay(
 fn queen_egg_laying(
     clock: Res<SimClock>,
     time: Res<Time>,
-    registry: Res<MapRegistry>,
     mut commands: Commands,
     map_grid_query: Query<&NestGrid, With<MapMarker>>,
-    mut queen_query: Query<&mut QueenHunger, With<Queen>>,
-    mut egg_timer: Local<f32>,
+    mut queen_query: Query<(&mut QueenHunger, &MapId), With<Queen>>,
 ) {
-    let Ok(mut hunger) = queen_query.get_single_mut() else { return };
     if clock.speed == SimSpeed::Paused {
         return;
     }
-
-    let Ok(grid) = map_grid_query.get(registry.player_nest) else { return };
-
     let dt = time.delta_secs() * clock.speed.multiplier();
-    *egg_timer += dt;
+    let mut rng = rand::thread_rng();
 
-    // Queen lays an egg when the timer fires and she has enough satiation reserves.
-    if *egg_timer >= QUEEN_EGG_INTERVAL && hunger.satiation >= EGG_SATIATION_COST {
-        *egg_timer -= QUEEN_EGG_INTERVAL;
-        hunger.satiation -= EGG_SATIATION_COST;
+    for (mut hunger, map_id) in &mut queen_query {
+        let Ok(grid) = map_grid_query.get(map_id.0) else { continue };
 
-        let mut rng = rand::thread_rng();
-        let queen_cells = find_chamber_cells(grid, ChamberKind::Queen);
-        if queen_cells.is_empty() {
-            return;
+        hunger.egg_timer += dt;
+
+        if hunger.egg_timer >= QUEEN_EGG_INTERVAL && hunger.satiation >= EGG_SATIATION_COST {
+            hunger.egg_timer -= QUEEN_EGG_INTERVAL;
+            hunger.satiation -= EGG_SATIATION_COST;
+
+            let queen_cells = find_chamber_cells(grid, ChamberKind::Queen);
+            if queen_cells.is_empty() {
+                continue;
+            }
+            let &(gx, gy) = &queen_cells[rng.gen_range(0..queen_cells.len())];
+            let pos = nest_grid_to_world(gx, gy);
+            let jitter = Vec2::new(
+                rng.gen_range(-NEST_CELL_SIZE * 0.35..NEST_CELL_SIZE * 0.35),
+                rng.gen_range(-NEST_CELL_SIZE * 0.35..NEST_CELL_SIZE * 0.35),
+            );
+
+            commands.spawn((
+                Sprite {
+                    color: Color::srgb(0.95, 0.95, 0.85),
+                    custom_size: Some(Vec2::splat(3.0)),
+                    ..default()
+                },
+                Transform::from_xyz(pos.x + jitter.x, pos.y + jitter.y, 2.5),
+                Visibility::Hidden,
+                Brood::new_egg(),
+                MapId(map_id.0),
+            ));
         }
-        let &(gx, gy) = &queen_cells[rng.gen_range(0..queen_cells.len())];
-        let pos = nest_grid_to_world(gx, gy);
-        let jitter = Vec2::new(
-            rng.gen_range(-NEST_CELL_SIZE * 0.35..NEST_CELL_SIZE * 0.35),
-            rng.gen_range(-NEST_CELL_SIZE * 0.35..NEST_CELL_SIZE * 0.35),
-        );
-
-        // Eggs always start hidden; sync_map_visibility will show them if nest is active.
-        commands.spawn((
-            Sprite {
-                color: Color::srgb(0.95, 0.95, 0.85),
-                custom_size: Some(Vec2::splat(3.0)),
-                ..default()
-            },
-            Transform::from_xyz(pos.x + jitter.x, pos.y + jitter.y, 2.5),
-            Visibility::Hidden,
-            Brood::new_egg(),
-            MapId(registry.player_nest),
-        ));
     }
 }
 
@@ -324,7 +364,9 @@ fn brood_development(
     registry: Res<MapRegistry>,
     mut commands: Commands,
     mut stack_query: Query<&mut crate::resources::nest::TileStackRegistry, With<MapMarker>>,
-    mut brood_query: Query<(Entity, &mut Brood, &mut Sprite, Option<&crate::components::nest::StackedItem>)>,
+    map_kind_query: Query<&MapKind, With<MapMarker>>,
+    portal_query: Query<&crate::components::map::MapPortal>,
+    mut brood_query: Query<(Entity, &mut Brood, &mut Sprite, &MapId, Option<&crate::components::nest::StackedItem>)>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -333,7 +375,7 @@ fn brood_development(
     let dt = time.delta_secs() * clock.speed.multiplier();
     let mut rng = rand::thread_rng();
 
-    for (entity, mut brood, mut sprite, stacked_opt) in &mut brood_query {
+    for (entity, mut brood, mut sprite, map_id, stacked_opt) in &mut brood_query {
         brood.timer += dt;
 
         if brood.timer >= brood.stage_duration() {
@@ -350,34 +392,45 @@ fn brood_development(
                     sprite.custom_size = Some(Vec2::splat(5.0));
                 }
                 BroodStage::Pupa => {
-                    // Remove from stack registry
-                    if let Ok(mut stack_reg) = stack_query.get_mut(registry.player_nest) {
+                    // Remove from stack registry (use brood's own map)
+                    if let Ok(mut stack_reg) = stack_query.get_mut(map_id.0) {
                         if let Some(stacked) = stacked_opt {
                             stack_reg.remove(stacked.grid_pos, entity);
                         }
                     }
                     commands.entity(entity).despawn();
 
-                    let nest = config.nest_position;
+                    // Derive colony_id from the nest's MapKind
+                    let colony_id = map_kind_query.get(map_id.0).ok()
+                        .and_then(|k| if let MapKind::Nest { colony_id } = k { Some(*colony_id) } else { None })
+                        .unwrap_or(0);
+
+                    // Find the surface exit position via portal
+                    let hatch_pos = portal_query.iter()
+                        .find(|p| p.map == map_id.0 && p.target_map == registry.surface)
+                        .map(|p| p.target_position)
+                        .unwrap_or(config.nest_position);
+
                     let caste = caste_ratios.pick_caste(rng.gen::<f32>());
+                    let is_red = colony_id != 0;
                     let (speed, health, state, color) = match caste {
                         Caste::Worker => (
                             config.ant_speed_worker,
                             Health::worker(),
                             crate::components::ant::AntState::Foraging,
-                            Color::srgb(0.1, 0.1, 0.1),
+                            if is_red { Color::srgb(0.7, 0.15, 0.1) } else { Color::srgb(0.1, 0.1, 0.1) },
                         ),
                         Caste::Soldier => (
                             config.ant_speed_soldier,
                             Health::soldier(),
                             crate::components::ant::AntState::Defending,
-                            Color::srgb(0.3, 0.1, 0.1),
+                            if is_red { Color::srgb(0.8, 0.2, 0.15) } else { Color::srgb(0.3, 0.1, 0.1) },
                         ),
                         _ => (
                             config.ant_speed_worker,
                             Health::worker(),
                             crate::components::ant::AntState::Foraging,
-                            Color::srgb(0.1, 0.1, 0.1),
+                            if is_red { Color::srgb(0.7, 0.15, 0.1) } else { Color::srgb(0.1, 0.1, 0.1) },
                         ),
                     };
 
@@ -390,13 +443,12 @@ fn brood_development(
                             custom_size: Some(Vec2::splat(4.0)),
                             ..default()
                         },
-                        Transform::from_xyz(nest.x + offset_x, nest.y + offset_y, 2.0),
-                        // New ants hatch onto the surface; hidden until sync_map_visibility.
+                        Transform::from_xyz(hatch_pos.x + offset_x, hatch_pos.y + offset_y, 2.0),
                         Visibility::Hidden,
                         Ant { caste, state, age: 0.0, hunger: 0.0 },
                         Movement::with_random_direction(speed, &mut rng),
                         health,
-                        ColonyMember { colony_id: 0 },
+                        ColonyMember { colony_id },
                         PositionHistory::default(),
                         TrailSense::default(),
                         MapId(registry.surface),
@@ -409,8 +461,9 @@ fn brood_development(
 
 fn update_colony_stats(
     mut stats: ResMut<ColonyStats>,
-    ant_query: Query<&Ant>,
-    brood_query: Query<&Brood>,
+    registry: Res<MapRegistry>,
+    ant_query: Query<(&Ant, &ColonyMember)>,
+    brood_query: Query<(&Brood, &MapId)>,
 ) {
     stats.workers = 0;
     stats.soldiers = 0;
@@ -419,7 +472,8 @@ fn update_colony_stats(
     stats.larvae = 0;
     stats.pupae = 0;
 
-    for ant in &ant_query {
+    for (ant, colony) in &ant_query {
+        if colony.colony_id != 0 { continue; }
         match ant.caste {
             Caste::Worker => stats.workers += 1,
             Caste::Soldier => stats.soldiers += 1,
@@ -428,7 +482,8 @@ fn update_colony_stats(
         }
     }
 
-    for brood in &brood_query {
+    for (brood, map_id) in &brood_query {
+        if map_id.0 != registry.player_nest { continue; }
         match brood.stage {
             BroodStage::Egg => stats.eggs += 1,
             BroodStage::Larva => stats.larvae += 1,

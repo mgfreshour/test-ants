@@ -261,6 +261,7 @@ mod tests {
             satiation: 0.25, // queen was just fed
             decay_rate: 0.005,
             starvation_timer: 50.0,
+            egg_timer: 0.0,
         };
         // The starvation system resets the timer when satiation > 0
         if hunger.satiation > 0.0 {

@@ -67,33 +67,31 @@ fn apply_brood_fed(
 fn apply_brood_relocated(
     mut commands: Commands,
     mut map_query: Query<(&NestGrid, &mut TileStackRegistry), With<MapMarker>>,
-    registry: Res<MapRegistry>,
-    mut query: Query<(Entity, &mut Brood, &mut Transform), With<BroodRelocated>>,
+    mut query: Query<(Entity, &mut Brood, &mut Transform, &MapId), With<BroodRelocated>>,
 ) {
-    let Ok((grid, mut stack_registry)) = map_query.get_mut(registry.player_nest) else { return };
-
-    for (entity, mut brood, mut transform) in &mut query {
+    for (entity, mut brood, mut transform, map_id) in &mut query {
         brood.relocated = true;
+
+        let Ok((grid, mut stack_registry)) = map_query.get_mut(map_id.0) else {
+            commands.entity(entity).remove::<BroodRelocated>();
+            continue;
+        };
 
         let tile_pos = stack_registry
             .find_available_tile(&grid, ChamberKind::Brood)
             .or_else(|| {
                 grid.find_expansion_candidate(ChamberKind::Brood).map(|exp| {
-                    // Immediately expand the zone inline since we have mutable access
-                    // The grid is immutable here, so we'll mark for deferred expansion
                     (exp.x, exp.y)
                 })
             });
 
         if let Some(tile_pos) = tile_pos {
-            // Check if this is an expansion (tile is currently a tunnel)
             if grid.get(tile_pos.0, tile_pos.1) == CellType::Tunnel {
-                // Mark for expansion - will be processed by apply_zone_expansions
                 commands.spawn(ExpandZoneDeferred {
                     x: tile_pos.0,
                     y: tile_pos.1,
                     chamber: ChamberKind::Brood,
-                    map: registry.player_nest,
+                    map: map_id.0,
                 });
             }
 
@@ -174,50 +172,56 @@ const INITIAL_NEST_ANTS: usize = 12;
 
 fn spawn_initial_nest_ants(
     mut commands: Commands,
-    registry: Res<MapRegistry>,
-    map_query: Query<&NestGrid, With<MapMarker>>,
+    map_query: Query<(Entity, &NestGrid, &MapKind), With<MapMarker>>,
 ) {
-    let Ok(grid) = map_query.get(registry.player_nest) else { return };
     let mut rng = rand::thread_rng();
 
-    // Find passable cells for spawning
-    let passable: Vec<(usize, usize)> = (0..grid.height)
-        .flat_map(|y| (0..grid.width).map(move |x| (x, y)))
-        .filter(|&(x, y)| grid.get(x, y).is_passable())
-        .collect();
+    for (map_entity, grid, kind) in &map_query {
+        let MapKind::Nest { colony_id } = kind else { continue };
 
-    if passable.is_empty() {
-        return;
-    }
+        let passable: Vec<(usize, usize)> = (0..grid.height)
+            .flat_map(|y| (0..grid.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| grid.get(x, y).is_passable())
+            .collect();
 
-    for _ in 0..INITIAL_NEST_ANTS {
-        let &(gx, gy) = &passable[rng.gen_range(0..passable.len())];
-        let pos = nest_grid_to_world(gx, gy);
-        let jitter_x = rng.gen_range(-3.0..3.0);
-        let jitter_y = rng.gen_range(-3.0..3.0);
+        if passable.is_empty() {
+            continue;
+        }
 
-        // Age varies — young ants nurse, older ants haul
-        let age = rng.gen_range(0.0..300.0);
+        let color = if *colony_id == 0 {
+            Color::srgb(0.15, 0.12, 0.08)
+        } else {
+            Color::srgb(0.45, 0.12, 0.08)
+        };
 
-        commands.spawn((
-            Sprite {
-                color: Color::srgb(0.15, 0.12, 0.08),
-                custom_size: Some(Vec2::splat(4.0)),
-                ..default()
-            },
-            Transform::from_xyz(pos.x + jitter_x, pos.y + jitter_y, 2.5),
-            Visibility::Hidden,
-            Ant {
-                caste: crate::components::ant::Caste::Worker,
-                state: AntState::Nursing, // will be reassigned by utility AI
-                age,
-                hunger: 0.0,
-            },
-            Health::worker(),
-            ColonyMember { colony_id: 0 },
-            MapId(registry.player_nest),
-            NestTask::Idle { timer: 0.0 },
-        ));
+        for _ in 0..INITIAL_NEST_ANTS {
+            let &(gx, gy) = &passable[rng.gen_range(0..passable.len())];
+            let pos = nest_grid_to_world(gx, gy);
+            let jitter_x = rng.gen_range(-3.0..3.0);
+            let jitter_y = rng.gen_range(-3.0..3.0);
+
+            let age = rng.gen_range(0.0..300.0);
+
+            commands.spawn((
+                Sprite {
+                    color,
+                    custom_size: Some(Vec2::splat(4.0)),
+                    ..default()
+                },
+                Transform::from_xyz(pos.x + jitter_x, pos.y + jitter_y, 2.5),
+                Visibility::Hidden,
+                Ant {
+                    caste: crate::components::ant::Caste::Worker,
+                    state: AntState::Nursing,
+                    age,
+                    hunger: 0.0,
+                },
+                Health::worker(),
+                ColonyMember { colony_id: *colony_id },
+                MapId(map_entity),
+                NestTask::Idle { timer: 0.0 },
+            ));
+        }
     }
 }
 
@@ -235,29 +239,28 @@ fn portal_transition(
     registry: Res<MapRegistry>,
     portal_query: Query<&MapPortal>,
     mut ant_query: Query<
-        (Entity, &mut Transform, &mut Ant, &ColonyMember, &mut MapId, &mut Visibility),
+        (Entity, &mut Transform, &mut Ant, &ColonyMember, &mut MapId, &mut Visibility, Option<&NestTask>),
         Without<PlayerControlled>,
     >,
-    nest_task_query: Query<(), With<NestTask>>,
     mut commands: Commands,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
     }
 
-    // Compute desired underground count from player nest's sliders.
-    let total_ants = ant_query.iter().len();
-    let current_underground = nest_task_query.iter().count();
-    let desired_underground = if let Ok(sliders) = sliders_query.get(registry.player_nest) {
-        ((sliders.nurse + sliders.dig) * total_ants as f32).ceil() as usize
-    } else {
-        0
-    };
+    // Count total ants per colony and underground ants per nest map.
+    let mut total_per_colony: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    let mut underground_per_nest: std::collections::HashMap<Entity, usize> = std::collections::HashMap::new();
+    for (_, _, _, colony, map_id, _, nest_task) in &ant_query {
+        *total_per_colony.entry(colony.colony_id).or_insert(0) += 1;
+        if nest_task.is_some() {
+            *underground_per_nest.entry(map_id.0).or_insert(0) += 1;
+        }
+    }
 
     let mut rng = rand::thread_rng();
 
-    for (entity, mut transform, mut ant, colony, mut map_id, mut vis) in &mut ant_query {
-        // Find all portals on the ant's current map that this colony can use.
+    for (entity, mut transform, mut ant, colony, mut map_id, mut vis, _) in &mut ant_query {
         for portal in &portal_query {
             if portal.map != map_id.0 {
                 continue;
@@ -273,11 +276,17 @@ fn portal_transition(
                 continue;
             }
 
-            // Entering a nest — apply throttle based on sliders.
             let target_is_nest = portal.target_map != registry.surface;
             if target_is_nest {
                 let is_following = ant.state == AntState::Following;
-                // Following ants bypass the throttle — they were recruited by the player.
+
+                // Per-colony throttle from the target nest's sliders.
+                let total_ants = *total_per_colony.get(&colony.colony_id).unwrap_or(&0);
+                let current_underground = *underground_per_nest.get(&portal.target_map).unwrap_or(&0);
+                let desired_underground = sliders_query.get(portal.target_map).ok()
+                    .map(|s| ((s.nurse + s.dig) * total_ants as f32).ceil() as usize)
+                    .unwrap_or(0);
+
                 if !is_following && !regressions::should_enter_nest(
                     current_underground,
                     desired_underground,
@@ -292,11 +301,9 @@ fn portal_transition(
                 map_id.0 = portal.target_map;
                 transform.translation.x = portal.target_position.x;
                 transform.translation.y = portal.target_position.y;
-                // Visibility will be corrected by sync_map_visibility.
                 *vis = Visibility::Hidden;
                 commands.entity(entity).insert(NestTask::Idle { timer: 0.0 });
             } else {
-                // Exiting a nest — Following ants leave immediately.
                 if ant.state == AntState::Following {
                     ant.state = AntState::Following;
                     map_id.0 = portal.target_map;
@@ -306,7 +313,6 @@ fn portal_transition(
                     commands.entity(entity).remove::<NestTask>();
                     commands.entity(entity).remove::<NestPath>();
                 }
-                // Non-following ants: handled by nest_to_surface_transition when idle.
             }
             break;
         }
@@ -563,7 +569,7 @@ fn nest_task_advance(
     brood_query: Query<(Entity, &Transform, &Brood)>,
     food_entity_query: Query<(Entity, &Transform, &FoodEntity, Option<&StackedItem>)>,
     carried_food_query: Query<(Entity, &CarriedBy), With<FoodEntity>>,
-    mut queen_hunger_query: Query<&mut QueenHunger, With<Queen>>,
+    mut queen_hunger_query: Query<(&mut QueenHunger, &MapId), With<Queen>>,
     mut ant_query: Query<(Entity, &Transform, &MapId, &mut NestTask, Option<&NestPath>)>,
 ) {
     if clock.speed == SimSpeed::Paused {
@@ -1011,9 +1017,12 @@ fn nest_task_advance(
                                 .find(|(_, cb)| cb.0 == entity);
 
                             if let Some((food_e, _)) = carried {
-                                // Transfer food to queen — partially refill her satiation reserve.
-                                if let Ok(mut hunger) = queen_hunger_query.get_single_mut() {
-                                    hunger.satiation = (hunger.satiation + 0.25).min(1.0);
+                                // Transfer food to queen on the same map as this ant.
+                                for (mut hunger, queen_map) in &mut queen_hunger_query {
+                                    if queen_map.0 == map_id.0 {
+                                        hunger.satiation = (hunger.satiation + 0.25).min(1.0);
+                                        break;
+                                    }
                                 }
                                 commands.entity(food_e).despawn();
                                 colony_food.stored -= 1.0;
