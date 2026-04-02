@@ -11,13 +11,13 @@ use crate::plugins::player::ToastQueue;
 /// Environment hazards and dynamic events: rain, flooding, footsteps, lawnmower, pesticide, day/night.
 pub struct EnvironmentPlugin;
 
-/// Message to trigger a hazard event manually.
-#[derive(Message)]
-pub enum HazardEvent {
-    TriggerRain,
-    TriggerFootstep,
-    TriggerLawnmower,
-    TriggerPesticide,
+/// Manual hazard trigger type.
+#[derive(Debug, Clone, Copy)]
+pub enum HazardTrigger {
+    Rain,
+    Footstep,
+    Lawnmower,
+    Pesticide,
 }
 
 impl Plugin for EnvironmentPlugin {
@@ -41,7 +41,7 @@ impl Plugin for EnvironmentPlugin {
 }
 
 /// Global environment state tracking weather, time, and active hazards.
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource, Debug)]
 pub struct EnvironmentState {
     /// 0.0 = midnight, 0.5 = noon, cycles every 3 minutes (180 seconds)
     pub time_of_day: f32,
@@ -112,6 +112,8 @@ pub enum HazardKind {
     Footstep,
     Lawnmower,
     Pesticide,
+    /// manual trigger queue (written by UI, consumed by system)
+    pub manual_triggers: Vec<HazardTrigger>,
 }
 
 #[derive(Clone, Debug)]
@@ -234,27 +236,27 @@ fn update_rain_state(
 /// Handle manually triggered hazard events from UI.
 fn handle_manual_hazards(
     mut env: ResMut<EnvironmentState>,
-    mut events: MessageReader<HazardEvent>,
     mut toasts: ResMut<ToastQueue>,
 ) {
-    for event in events.read() {
-        match event {
-            HazardEvent::TriggerRain => {
+    let triggers: Vec<HazardTrigger> = env.manual_triggers.drain(..).collect();
+    for trigger in triggers {
+        match trigger {
+            HazardTrigger::Rain => {
                 env.is_raining = true;
                 env.evaporation_multiplier = 10.0;
                 env.flood_level = 0.0;
                 env.rain_timer = 60.0;
                 toasts.push("Rain triggered!".to_string());
             }
-            HazardEvent::TriggerFootstep => {
+            HazardTrigger::Footstep => {
                 spawn_footstep_path(&mut env, &mut rand::thread_rng());
                 toasts.push("Human spotted!".to_string());
             }
-            HazardEvent::TriggerLawnmower => {
+            HazardTrigger::Lawnmower => {
                 spawn_mower(&mut env, &mut rand::thread_rng());
                 toasts.push("Lawnmower!".to_string());
             }
-            HazardEvent::TriggerPesticide => {
+            HazardTrigger::Pesticide => {
                 let pos = Vec2::new(
                     rand::thread_rng().gen_range(100.0..1180.0),
                     rand::thread_rng().gen_range(100.0..620.0),
