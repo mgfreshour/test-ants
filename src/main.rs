@@ -5,6 +5,7 @@ mod sim_core;
 mod ui;
 
 use bevy::prelude::*;
+use bevy::window::WindowResolution;
 
 use plugins::simulation::SimulationPlugin;
 use plugins::terrain::TerrainPlugin;
@@ -15,9 +16,9 @@ use plugins::nest_ai::NestAiPlugin;
 use plugins::nest_pheromone::NestPheromonePlugin;
 use plugins::nest_navigation::NestNavigationPlugin;
 use plugins::combat::CombatPlugin;
+use plugins::egui_ui::EguiUiPlugin;
 use plugins::pheromone::PheromonePlugin;
 use plugins::player::PlayerPlugin;
-use ui::colony_panel::ColonyPanelPlugin;
 use ui::hud::HudPlugin;
 
 fn main() {
@@ -25,7 +26,7 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Colony — An Ant Colony Simulation".into(),
-                resolution: (1280.0, 720.0).into(),
+                resolution: WindowResolution::new(1280, 720),
                 ..default()
             }),
             ..default()
@@ -43,7 +44,7 @@ fn main() {
             PheromonePlugin,
             PlayerPlugin,
             CombatPlugin,
-            ColonyPanelPlugin,
+            EguiUiPlugin,
             HudPlugin,
         ))
         .run();

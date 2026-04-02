@@ -3,6 +3,7 @@ pub mod terrain;
 pub mod ant_ai;
 pub mod camera;
 pub mod combat;
+pub mod egui_ui;
 pub mod nest;
 pub mod nest_ai;
 pub mod nest_navigation;

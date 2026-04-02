@@ -29,10 +29,10 @@ fn setup_camera(mut commands: Commands, config: Res<SimConfig>) {
     commands.spawn((
         Camera2d,
         Transform::from_xyz(center_x, center_y, 999.0),
-        OrthographicProjection {
+        Projection::from(OrthographicProjection {
             scale: 1.0,
             ..OrthographicProjection::default_2d()
-        },
+        }),
         MainCamera,
     ));
 }
@@ -46,13 +46,18 @@ fn camera_pan(
     input: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     mode: Res<PlayerMode>,
-    mut query: Query<(&mut Transform, &OrthographicProjection), With<MainCamera>>,
+    mut query: Query<(&mut Transform, &Projection), With<MainCamera>>,
 ) {
     if mode.controlling {
         return;
     }
-    let Ok((mut transform, projection)) = query.get_single_mut() else {
+    let Ok((mut transform, projection)) = query.single_mut() else {
         return;
+    };
+
+    let scale = match projection {
+        Projection::Orthographic(ref ortho) => ortho.scale,
+        _ => 1.0,
     };
 
     let mut delta = Vec2::ZERO;
@@ -71,23 +76,25 @@ fn camera_pan(
     }
 
     if delta != Vec2::ZERO {
-        let speed = PAN_SPEED * projection.scale * time.delta_secs();
+        let speed = PAN_SPEED * scale * time.delta_secs();
         transform.translation.x += delta.x * speed;
         transform.translation.y += delta.y * speed;
     }
 }
 
 fn camera_zoom(
-    mut scroll_events: EventReader<MouseWheel>,
-    mut query: Query<&mut OrthographicProjection, With<MainCamera>>,
+    mut scroll_events: MessageReader<MouseWheel>,
+    mut query: Query<&mut Projection, With<MainCamera>>,
 ) {
-    let Ok(mut projection) = query.get_single_mut() else {
+    let Ok(mut projection) = query.single_mut() else {
         return;
     };
 
-    for event in scroll_events.read() {
-        let zoom_delta = -event.y * ZOOM_SPEED;
-        projection.scale = (projection.scale + zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
+    if let Projection::Orthographic(ref mut ortho) = *projection {
+        for event in scroll_events.read() {
+            let zoom_delta = -event.y * ZOOM_SPEED;
+            ortho.scale = (ortho.scale + zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
+        }
     }
 }
 
@@ -96,7 +103,7 @@ fn camera_clamp(
     active: Option<Res<ActiveMap>>,
     mut query: Query<&mut Transform, With<MainCamera>>,
 ) {
-    let Ok(mut transform) = query.get_single_mut() else {
+    let Ok(mut transform) = query.single_mut() else {
         return;
     };
 

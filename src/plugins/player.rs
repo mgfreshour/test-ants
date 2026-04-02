@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use rand::Rng;
 
 use crate::components::ant::{
-    Ant, AntState, CarriedItem, ColonyMember, Movement, PlayerControlled,
+    Ant, AntState, CarriedItem, ColonyMember, Health, Movement, PlayerControlled,
 };
 use crate::components::map::{MapId, MapKind, MapMarker, MapPortal, PORTAL_RANGE};
 use crate::components::nest::{NestPath, NestTask};
@@ -25,6 +25,65 @@ const NEST_PLAYER_SPEED: f32 = 60.0;
 
 /// Default nest-view camera scale (matches nest.rs).
 const NEST_CAMERA_SCALE: f32 = 0.7;
+
+// ── Player action events ───────────────────────────────────────────
+
+/// Discrete player actions emitted by keyboard or UI buttons.
+#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayerAction {
+    Pickup,
+    Drop,
+    Recruit,
+    Dismiss,
+    Swap,
+    Attack,
+    Feed,
+}
+
+/// Per-frame snapshot of which player actions are currently available.
+/// Computed by `update_action_context` and read by the egui action bar.
+#[derive(Resource, Default)]
+pub struct ActionContext {
+    pub can_pickup: bool,
+    pub can_drop: bool,
+    pub can_recruit: bool,
+    pub can_dismiss: bool,
+    pub can_swap: bool,
+    pub can_attack: bool,
+    pub can_feed: bool,
+    pub trail_active: bool,
+}
+
+/// Queue of notification toasts to display in the UI.
+#[derive(Resource, Default)]
+pub struct ToastQueue {
+    pub toasts: Vec<Toast>,
+}
+
+pub struct Toast {
+    pub message: String,
+    pub timer: f32,
+}
+
+impl ToastQueue {
+    pub fn push(&mut self, message: impl Into<String>) {
+        self.toasts.push(Toast {
+            message: message.into(),
+            timer: 3.0,
+        });
+        // Keep at most 5 queued.
+        while self.toasts.len() > 5 {
+            self.toasts.remove(0);
+        }
+    }
+
+    pub fn tick(&mut self, dt: f32) {
+        for toast in &mut self.toasts {
+            toast.timer -= dt;
+        }
+        self.toasts.retain(|t| t.timer > 0.0);
+    }
+}
 
 /// Which pheromone the R key deposits: follow (Recruit) or attack (AttackRecruit).
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,11 +144,17 @@ impl Plugin for PlayerPlugin {
         app.init_resource::<PlayerMode>()
             .init_resource::<FollowerCount>()
             .init_resource::<RecruitMode>()
+            .init_resource::<ActionContext>()
+            .init_resource::<ToastQueue>()
+            .add_message::<PlayerAction>()
             .add_systems(
                 Update,
                 (
                     designate_player_ant,
                     update_follower_count,
+                    update_action_context,
+                    tick_toasts,
+                    keyboard_to_player_actions,
                 ),
             )
             // Systems that work on any map (no viewing_surface gate).
@@ -175,7 +240,7 @@ fn player_portal_transition(
     config: Res<SimConfig>,
     mut active: ResMut<ActiveMap>,
     mut saved: ResMut<SavedCameraStates>,
-    mut camera_query: Query<(&mut Transform, &mut OrthographicProjection), With<MainCamera>>,
+    mut camera_query: Query<(&mut Transform, &mut Projection), With<MainCamera>>,
     portal_query: Query<&MapPortal>,
     map_kind_query: Query<&MapKind, With<MapMarker>>,
     mut player_query: Query<
@@ -192,7 +257,7 @@ fn player_portal_transition(
     }
 
     let Ok((player_entity, mut player_tf, mut player_map, mut player_vis, colony)) =
-        player_query.get_single_mut()
+        player_query.single_mut()
     else {
         return;
     };
@@ -260,12 +325,16 @@ fn player_portal_transition(
     }
 
     // Switch the active map view (mirrors cycle_map_view logic).
-    let Ok((mut cam_tf, mut proj)) = camera_query.get_single_mut() else { return };
+    let Ok((mut cam_tf, mut proj)) = camera_query.single_mut() else { return };
 
     // Save camera state for the map we're leaving.
+    let current_scale = match *proj {
+        Projection::Orthographic(ref ortho) => ortho.scale,
+        _ => 1.0,
+    };
     saved.0.insert(active.entity, SavedCamera {
         position: cam_tf.translation.truncate(),
-        scale: proj.scale,
+        scale: current_scale,
     });
 
     let target_kind = map_kind_query.get(target_map).copied().unwrap_or(MapKind::Surface);
@@ -274,15 +343,21 @@ fn player_portal_transition(
     if let Some(cam) = saved.0.get(&target_map) {
         cam_tf.translation.x = cam.position.x;
         cam_tf.translation.y = cam.position.y;
-        proj.scale = cam.scale;
+        if let Projection::Orthographic(ref mut ortho) = *proj {
+            ortho.scale = cam.scale;
+        }
     } else if entering_nest {
         cam_tf.translation.x = target_pos.x;
         cam_tf.translation.y = target_pos.y;
-        proj.scale = NEST_CAMERA_SCALE;
+        if let Projection::Orthographic(ref mut ortho) = *proj {
+            ortho.scale = NEST_CAMERA_SCALE;
+        }
     } else {
         cam_tf.translation.x = config.world_width / 2.0;
         cam_tf.translation.y = config.world_height / 2.0;
-        proj.scale = 1.0;
+        if let Projection::Orthographic(ref mut ortho) = *proj {
+            ortho.scale = 1.0;
+        }
     }
 
     active.entity = target_map;
@@ -304,7 +379,7 @@ fn player_movement(
         return;
     }
 
-    let Ok((mut transform, movement, mut ant, map_id)) = query.get_single_mut() else {
+    let Ok((mut transform, movement, mut ant, map_id)) = query.single_mut() else {
         return;
     };
 
@@ -363,7 +438,7 @@ fn player_nest_collision(
     nest_query: Query<&NestGrid, With<MapMarker>>,
     mut query: Query<(&mut Transform, &MapId), With<PlayerControlled>>,
 ) {
-    let Ok((mut transform, map_id)) = query.get_single_mut() else { return };
+    let Ok((mut transform, map_id)) = query.single_mut() else { return };
     if map_id.0 == registry.surface {
         return;
     }
@@ -418,18 +493,19 @@ fn player_nest_collision(
 // ── Surface-only interactions ───────────────────────────────────────
 
 fn player_pickup(
-    input: Res<ButtonInput<KeyCode>>,
+    mut events: MessageReader<PlayerAction>,
     mode: Res<PlayerMode>,
     registry: Res<MapRegistry>,
     mut commands: Commands,
     player_query: Query<(Entity, &Transform, &MapId), (With<PlayerControlled>, Without<CarriedItem>)>,
     mut food_query: Query<(&Transform, &mut FoodSource)>,
 ) {
-    if !mode.controlling || !input.just_pressed(KeyCode::KeyE) {
+    let triggered = events.read().any(|a| *a == PlayerAction::Pickup);
+    if !mode.controlling || !triggered {
         return;
     }
 
-    let Ok((player_entity, player_tf, map_id)) = player_query.get_single() else {
+    let Ok((player_entity, player_tf, map_id)) = player_query.single() else {
         return;
     };
     if map_id.0 != registry.surface {
@@ -455,7 +531,7 @@ fn player_pickup(
 }
 
 fn player_drop(
-    input: Res<ButtonInput<KeyCode>>,
+    mut events: MessageReader<PlayerAction>,
     mode: Res<PlayerMode>,
     registry: Res<MapRegistry>,
     mut commands: Commands,
@@ -463,11 +539,12 @@ fn player_drop(
     mut food_query: Query<&mut ColonyFood, With<MapMarker>>,
     query: Query<(Entity, &Transform, &CarriedItem, &MapId), With<PlayerControlled>>,
 ) {
-    if !mode.controlling || !input.just_pressed(KeyCode::KeyQ) {
+    let triggered = events.read().any(|a| *a == PlayerAction::Drop);
+    if !mode.controlling || !triggered {
         return;
     }
 
-    let Ok((entity, transform, carried, map_id)) = query.get_single() else {
+    let Ok((entity, transform, carried, map_id)) = query.single() else {
         return;
     };
     if map_id.0 != registry.surface {
@@ -486,18 +563,19 @@ fn player_drop(
 }
 
 fn player_regurgitate(
-    input: Res<ButtonInput<KeyCode>>,
+    mut events: MessageReader<PlayerAction>,
     mode: Res<PlayerMode>,
     registry: Res<MapRegistry>,
     mut commands: Commands,
     player_query: Query<(Entity, &Transform, &CarriedItem, &MapId), With<PlayerControlled>>,
     mut ant_query: Query<(&Transform, &mut Ant), Without<PlayerControlled>>,
 ) {
-    if !mode.controlling || !input.just_pressed(KeyCode::KeyF) {
+    let triggered = events.read().any(|a| *a == PlayerAction::Feed);
+    if !mode.controlling || !triggered {
         return;
     }
 
-    let Ok((player_entity, player_tf, carried, map_id)) = player_query.get_single() else {
+    let Ok((player_entity, player_tf, carried, map_id)) = player_query.single() else {
         return;
     };
     if map_id.0 != registry.surface {
@@ -545,7 +623,7 @@ fn player_pheromone(
         return;
     }
 
-    let Ok((transform, colony, map_id)) = query.get_single() else {
+    let Ok((transform, colony, map_id)) = query.single() else {
         return;
     };
 
@@ -574,6 +652,7 @@ fn player_pheromone(
 /// Hold R to deposit recruit pheromone (follow or attack, based on current mode)
 /// in a wide area around the player. Works on both surface and underground.
 fn player_recruit_pheromone(
+    mut events: MessageReader<PlayerAction>,
     clock: Res<SimClock>,
     input: Res<ButtonInput<KeyCode>>,
     mode: Res<PlayerMode>,
@@ -589,11 +668,13 @@ fn player_recruit_pheromone(
         return;
     }
 
-    if !input.pressed(KeyCode::KeyR) {
+    let from_event = events.read().any(|a| *a == PlayerAction::Recruit);
+    let from_key = input.pressed(KeyCode::KeyR);
+    if !from_event && !from_key {
         return;
     }
 
-    let Ok((transform, colony, map_id)) = query.get_single() else {
+    let Ok((transform, colony, map_id)) = query.single() else {
         return;
     };
 
@@ -653,18 +734,19 @@ fn player_recruit_pheromone(
 
 /// Press T to clear recruit pheromone, dismissing followers. Works on both maps.
 fn player_dismiss_pheromone(
-    input: Res<ButtonInput<KeyCode>>,
+    mut events: MessageReader<PlayerAction>,
     mode: Res<PlayerMode>,
     registry: Res<MapRegistry>,
     mut grids: Option<ResMut<ColonyPheromones>>,
     mut nest_phero_query: Query<&mut NestPheromoneGrid, With<MapMarker>>,
     query: Query<(&ColonyMember, &MapId), With<PlayerControlled>>,
 ) {
-    if !mode.controlling || !input.just_pressed(KeyCode::KeyT) {
+    let triggered = events.read().any(|a| *a == PlayerAction::Dismiss);
+    if !mode.controlling || !triggered {
         return;
     }
 
-    let Ok((colony, map_id)) = query.get_single() else {
+    let Ok((colony, map_id)) = query.single() else {
         return;
     };
 
@@ -688,18 +770,19 @@ fn player_dismiss_pheromone(
 // ── Exchange / swap ant ─────────────────────────────────────────────
 
 fn exchange_ant(
-    input: Res<ButtonInput<KeyCode>>,
+    mut events: MessageReader<PlayerAction>,
     mode: Res<PlayerMode>,
     registry: Res<MapRegistry>,
     mut commands: Commands,
     player_query: Query<(Entity, &Transform, &MapId), With<PlayerControlled>>,
     candidate_query: Query<(Entity, &Transform, &MapId), (With<Ant>, Without<PlayerControlled>)>,
 ) {
-    if !mode.controlling || !input.just_pressed(KeyCode::KeyX) {
+    let triggered = events.read().any(|a| *a == PlayerAction::Swap);
+    if !mode.controlling || !triggered {
         return;
     }
 
-    let Ok((player_entity, player_tf, player_map)) = player_query.get_single() else {
+    let Ok((player_entity, player_tf, player_map)) = player_query.single() else {
         return;
     };
     // Only swap to surface ants when on surface.
@@ -744,11 +827,11 @@ fn camera_follow_player(
         return;
     }
 
-    let Ok(player_tf) = player_query.get_single() else {
+    let Ok(player_tf) = player_query.single() else {
         return;
     };
 
-    let Ok(mut cam_tf) = camera_query.get_single_mut() else {
+    let Ok(mut cam_tf) = camera_query.single_mut() else {
         return;
     };
 
@@ -762,7 +845,7 @@ fn camera_follow_player(
 fn update_player_visual(
     mut query: Query<(&mut Sprite, Option<&CarriedItem>), With<PlayerControlled>>,
 ) {
-    let Ok((mut sprite, carried)) = query.get_single_mut() else {
+    let Ok((mut sprite, carried)) = query.single_mut() else {
         return;
     };
 
@@ -772,4 +855,104 @@ fn update_player_visual(
         PLAYER_COLOR
     };
     sprite.custom_size = Some(Vec2::splat(6.0));
+}
+
+// ── Keyboard→event bridge ──────────────────────────────────────────
+
+fn keyboard_to_player_actions(
+    input: Res<ButtonInput<KeyCode>>,
+    mode: Res<PlayerMode>,
+    mut writer: MessageWriter<PlayerAction>,
+) {
+    if !mode.controlling {
+        return;
+    }
+    if input.just_pressed(KeyCode::KeyE) {
+        writer.write(PlayerAction::Pickup);
+    }
+    if input.just_pressed(KeyCode::KeyQ) {
+        writer.write(PlayerAction::Drop);
+    }
+    if input.just_pressed(KeyCode::KeyF) {
+        writer.write(PlayerAction::Feed);
+    }
+    if input.just_pressed(KeyCode::KeyT) {
+        writer.write(PlayerAction::Dismiss);
+    }
+    if input.just_pressed(KeyCode::KeyX) {
+        writer.write(PlayerAction::Swap);
+    }
+    if input.just_pressed(KeyCode::Space) {
+        writer.write(PlayerAction::Attack);
+    }
+}
+
+// ── Action context (enables/disables UI buttons) ───────────────────
+
+fn update_action_context(
+    mut ctx: ResMut<ActionContext>,
+    mode: Res<PlayerMode>,
+    input: Res<ButtonInput<KeyCode>>,
+    registry: Res<MapRegistry>,
+    followers: Res<FollowerCount>,
+    player_query: Query<(&Transform, &MapId, Option<&CarriedItem>), With<PlayerControlled>>,
+    food_query: Query<(&Transform, &FoodSource)>,
+    ant_query: Query<(&Transform, &ColonyMember, &MapId), (With<Ant>, Without<PlayerControlled>)>,
+) {
+    *ctx = ActionContext::default();
+    if !mode.controlling {
+        return;
+    }
+
+    let Ok((player_tf, map_id, carried)) = player_query.single() else {
+        return;
+    };
+
+    let player_pos = player_tf.translation.truncate();
+    let on_surface = map_id.0 == registry.surface;
+
+    // Pickup: food nearby and not carrying
+    if on_surface && carried.is_none() {
+        ctx.can_pickup = food_query.iter().any(|(tf, food)| {
+            food.remaining > 0.0 && player_pos.distance(tf.translation.truncate()) < PICKUP_RANGE
+        });
+    }
+
+    // Drop: carrying something
+    ctx.can_drop = carried.is_some();
+
+    // Feed: carrying and ant nearby
+    if carried.is_some() {
+        ctx.can_feed = ant_query.iter().any(|(tf, _, mid)| {
+            mid.0 == map_id.0 && player_pos.distance(tf.translation.truncate()) < PICKUP_RANGE
+        });
+    }
+
+    // Recruit: always available when controlling
+    ctx.can_recruit = true;
+
+    // Dismiss: has followers
+    ctx.can_dismiss = followers.0 > 0;
+
+    // Swap: other ants on same map
+    ctx.can_swap = on_surface && ant_query.iter().any(|(_, _, mid)| mid.0 == registry.surface);
+
+    // Attack: enemies nearby
+    if on_surface {
+        ctx.can_attack = ant_query.iter().any(|(tf, col, mid)| {
+            mid.0 == registry.surface
+                && col.colony_id != 0
+                && player_pos.distance(tf.translation.truncate()) < 20.0
+        });
+    }
+
+    // Trail active
+    ctx.trail_active = input.pressed(KeyCode::ShiftLeft) || input.pressed(KeyCode::ShiftRight);
+}
+
+fn tick_toasts(
+    time: Res<Time>,
+    mut toasts: ResMut<ToastQueue>,
+) {
+    toasts.tick(time.delta_secs());
 }

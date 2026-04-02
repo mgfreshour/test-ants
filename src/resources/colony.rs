@@ -50,6 +50,24 @@ impl CasteRatios {
     }
 }
 
+/// Player colony aggression/defense settings exposed via UI.
+#[derive(Resource)]
+pub struct AggressionSettings {
+    /// Patrol radius in tiles — how far defenders roam from the nest.
+    pub patrol_radius: f32,
+    /// Alarm pheromone intensity threshold to trigger defender response.
+    pub alarm_threshold: f32,
+}
+
+impl Default for AggressionSettings {
+    fn default() -> Self {
+        Self {
+            patrol_radius: 200.0,
+            alarm_threshold: 1.0,
+        }
+    }
+}
+
 #[derive(Resource, Default)]
 pub struct ColonyStats {
     pub workers: u32,

@@ -364,16 +364,17 @@ fn spider_ai(
 }
 
 fn player_attack(
-    input: Res<ButtonInput<KeyCode>>,
+    mut events: MessageReader<crate::plugins::player::PlayerAction>,
     player_query: Query<(&Transform, &ColonyMember), With<PlayerControlled>>,
     mut enemy_query: Query<(&Transform, &ColonyMember, &mut Health), (With<Ant>, Without<PlayerControlled>)>,
     mut spider_query: Query<(&Transform, &mut Spider)>,
 ) {
-    if !input.just_pressed(KeyCode::Space) {
+    let triggered = events.read().any(|a| *a == crate::plugins::player::PlayerAction::Attack);
+    if !triggered {
         return;
     }
 
-    let Ok((player_tf, player_colony)) = player_query.get_single() else {
+    let Ok((player_tf, player_colony)) = player_query.single() else {
         return;
     };
 
