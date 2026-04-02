@@ -11,6 +11,7 @@ use plugins::simulation::SimulationPlugin;
 use plugins::terrain::TerrainPlugin;
 use plugins::ant_ai::AntAiPlugin;
 use plugins::camera::CameraPlugin;
+use plugins::environment::EnvironmentPlugin;
 use plugins::nest::NestPlugin;
 use plugins::nest_ai::NestAiPlugin;
 use plugins::nest_pheromone::NestPheromonePlugin;
@@ -37,6 +38,7 @@ fn main() {
             TerrainPlugin,
             AntAiPlugin,
             CameraPlugin,
+            EnvironmentPlugin,
             NestPlugin,
             NestAiPlugin,
             NestPheromonePlugin,

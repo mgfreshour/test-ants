@@ -114,6 +114,10 @@ pub struct PlayerControlled;
 #[derive(Component)]
 pub struct Follower;
 
+/// Marker component for ants currently in the nest (underground).
+#[derive(Component)]
+pub struct Underground;
+
 /// What trail, if any, this ant is currently following.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TrailSense {

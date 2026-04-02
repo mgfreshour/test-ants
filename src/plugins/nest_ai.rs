@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::ant::{Ant, AntState, ColonyMember, Health, PlayerControlled};
+use crate::components::ant::{Ant, AntState, ColonyMember, Health, PlayerControlled, Underground};
 use crate::components::map::{MapId, MapKind, MapMarker, MapPortal, PORTAL_RANGE};
 use crate::components::nest::{
     AttendStep, Brood, BroodStage, CarriedBy, CellType, ChamberKind, DigStep, FeedStep, FoodEntity,
@@ -29,6 +29,7 @@ impl Plugin for NestAiPlugin {
             .add_systems(
                 Update,
                 (
+                    apply_flood_damage,
                     apply_brood_fed,
                     apply_brood_relocated,
                     apply_deferred_zone_expansions,
@@ -56,6 +57,19 @@ impl Plugin for NestAiPlugin {
                 )
                     .chain(),
             );
+    }
+}
+
+/// Apply flood damage to nest ants when water level is high.
+fn apply_flood_damage(
+    env: Res<crate::plugins::environment::EnvironmentState>,
+    mut query: Query<&mut Health, With<Underground>>,
+) {
+    if env.flood_level > 0.1 {
+        let damage = env.flood_level * 10.0; // Scale damage by flood level
+        for mut health in &mut query {
+            health.current -= damage * 0.016; // Per-frame damage
+        }
     }
 }
 

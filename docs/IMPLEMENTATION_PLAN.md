@@ -457,13 +457,13 @@ Rain washes away pheromone trails. Human footsteps crush ants. Lawnmowers sweep 
 > Colony is foraging happily. Rain starts — pheromone overlay fades rapidly, ants lose their trails and scatter. Rain stops, ants rebuild trails. A shadow appears — STOMP. 8 ants crushed. A lawnmower warning toast appears — it sweeps across, devastating a foraging line. Tinted ground marks a pesticide zone, ants walking through take damage. Night falls, ants return to nest. Day breaks, they emerge again.
 
 ### Acceptance Criteria
-- [ ] Rain accelerates pheromone decay, ants lose trails
-- [ ] Flooding damages ants in deep tunnels
-- [ ] Footstep kills ants in area with warning
-- [ ] Lawnmower sweeps and kills in path
-- [ ] Pesticide creates lingering damage zone
-- [ ] Day/night cycle affects ant behavior
-- [ ] Hazard event notifications via egui toasts
+- [x] Rain accelerates pheromone decay, ants lose trails
+- [x] Flooding damages ants in deep tunnels
+- [x] Footstep kills ants in area with warning
+- [x] Lawnmower sweeps and kills in path
+- [x] Pesticide creates lingering damage zone
+- [x] Day/night cycle affects ant behavior
+- [x] Hazard event notifications via egui toasts
 
 ---
 
