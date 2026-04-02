@@ -251,7 +251,7 @@ fn ant_forage_steering(
     config: Res<SimConfig>,
     grids: Option<Res<ColonyPheromones>>,
     food_query: Query<&Transform, With<FoodSource>>,
-    mut query: Query<(Entity, &Transform, &mut Movement, &mut Ant, &ColonyMember, &PositionHistory, &mut TrailSense), (Without<CarriedItem>, Without<PlayerControlled>)>,
+    mut query: Query<(Entity, &Transform, &mut Movement, &mut Ant, &ColonyMember, &PositionHistory, &mut TrailSense, &mut SteeringTarget, &mut SteeringWeights), (Without<CarriedItem>, Without<PlayerControlled>)>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -260,7 +260,7 @@ fn ant_forage_steering(
     let mut rng = rand::thread_rng();
     let noise = config.exploration_noise;
 
-    for (entity, transform, mut movement, mut ant, colony, history, mut sense) in &mut query {
+    for (entity, transform, mut movement, mut ant, colony, history, mut sense, mut steering_target, mut steering_weights) in &mut query {
         if ant.state != AntState::Foraging {
             continue;
         }
@@ -296,7 +296,12 @@ fn ant_forage_steering(
 
         if let Some((_, food_pos)) = nearest_food {
             let to_food = (food_pos - pos).normalize_or_zero();
-            movement.direction = to_food;
+            *steering_target = SteeringTarget::Direction { target: to_food };
+            *steering_weights = SteeringWeights {
+                seek_weight: 1.0,
+                separation_weight: 0.5,
+                forward_weight: FORWARD_WEIGHT,
+            };
             *sense = TrailSense::BeelineFood;
             continue;
         }
@@ -337,15 +342,22 @@ fn ant_forage_steering(
         let momentum = history.anti_backtrack(pos) * ANTI_BACKTRACK_WEIGHT;
 
         let noise_scale = if on_trail { 0.3 } else { 1.0 };
-        let mut new_dir = (fwd * FORWARD_WEIGHT
+        let mut target_dir = (fwd * FORWARD_WEIGHT
             + perturbed_fwd * noise_scale
             + pheromone_bias
             + momentum)
             .normalize_or_zero();
-        if new_dir == Vec2::ZERO {
-            new_dir = perturbed_fwd;
+        if target_dir == Vec2::ZERO {
+            target_dir = perturbed_fwd;
         }
-        movement.direction = new_dir;
+
+        // Set steering target instead of direct movement
+        *steering_target = SteeringTarget::Direction { target: target_dir };
+        *steering_weights = SteeringWeights {
+            seek_weight: 1.0,
+            separation_weight: 0.5,
+            forward_weight: FORWARD_WEIGHT,
+        };
     }
 }
 
@@ -354,7 +366,7 @@ fn ant_forage_steering(
 fn ant_follow_recruit_steering(
     clock: Res<SimClock>,
     grids: Option<Res<ColonyPheromones>>,
-    mut query: Query<(&Transform, &mut Movement, &mut Ant, &ColonyMember, &mut TrailSense), Without<PlayerControlled>>,
+    mut query: Query<(&Transform, &mut Movement, &mut Ant, &ColonyMember, &mut TrailSense, &mut SteeringTarget, &mut SteeringWeights), Without<PlayerControlled>>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -362,7 +374,7 @@ fn ant_follow_recruit_steering(
 
     let mut rng = rand::thread_rng();
 
-    for (transform, mut movement, mut ant, colony, mut sense) in &mut query {
+    for (transform, mut movement, mut ant, colony, mut sense, mut steering_target, mut steering_weights) in &mut query {
         if ant.state != AntState::Following {
             continue;
         }
@@ -391,7 +403,12 @@ fn ant_follow_recruit_steering(
                                 + jitter)
                                 .normalize_or_zero();
                             if new_dir != Vec2::ZERO {
-                                movement.direction = new_dir;
+                                *steering_target = SteeringTarget::Direction { target: new_dir };
+                                *steering_weights = SteeringWeights {
+                                    seek_weight: 1.0,
+                                    separation_weight: 0.5,
+                                    forward_weight: FORWARD_WEIGHT,
+                                };
                             }
                         }
                     }
@@ -416,7 +433,7 @@ const ATTACK_ENEMY_DETECT_RANGE: f32 = 80.0;
 fn ant_attack_recruit_steering(
     clock: Res<SimClock>,
     grids: Option<Res<ColonyPheromones>>,
-    mut query: Query<(&Transform, &mut Movement, &mut Ant, &ColonyMember, &mut TrailSense), Without<PlayerControlled>>,
+    mut query: Query<(&Transform, &mut Movement, &mut Ant, &ColonyMember, &mut TrailSense, &mut SteeringTarget, &mut SteeringWeights), Without<PlayerControlled>>,
     enemy_query: Query<(&Transform, &ColonyMember), With<Ant>>,
 ) {
     if clock.speed == SimSpeed::Paused {
@@ -425,7 +442,7 @@ fn ant_attack_recruit_steering(
 
     let mut rng = rand::thread_rng();
 
-    for (transform, mut movement, mut ant, colony, mut sense) in &mut query {
+    for (transform, mut movement, mut ant, colony, mut sense, mut steering_target, mut steering_weights) in &mut query {
         if ant.state != AntState::Attacking {
             continue;
         }
@@ -450,7 +467,12 @@ fn ant_attack_recruit_steering(
 
         if let Some((dist, enemy_pos)) = nearest_enemy {
             let to_enemy = (enemy_pos - pos).normalize_or_zero();
-            movement.direction = to_enemy;
+            *steering_target = SteeringTarget::Direction { target: to_enemy };
+            *steering_weights = SteeringWeights {
+                seek_weight: 1.0,
+                separation_weight: 0.5,
+                forward_weight: FORWARD_WEIGHT,
+            };
             // Within combat range, combat_detection system handles state transition
             if dist < 15.0 {
                 ant.state = AntState::Defending;
@@ -483,7 +505,12 @@ fn ant_attack_recruit_steering(
                                 + jitter)
                                 .normalize_or_zero();
                             if new_dir != Vec2::ZERO {
-                                movement.direction = new_dir;
+                                *steering_target = SteeringTarget::Direction { target: new_dir };
+                                *steering_weights = SteeringWeights {
+                                    seek_weight: 1.0,
+                                    separation_weight: 0.5,
+                                    forward_weight: FORWARD_WEIGHT,
+                                };
                             }
                         }
                     }
@@ -568,7 +595,7 @@ fn ant_return_steering(
     grids: Option<Res<ColonyPheromones>>,
     registry: Res<MapRegistry>,
     portal_query: Query<&MapPortal>,
-    mut query: Query<(&Transform, &mut Movement, &Ant, &ColonyMember, &MapId, &PositionHistory, &mut TrailSense), (With<CarriedItem>, Without<PlayerControlled>)>,
+    mut query: Query<(&Transform, &mut Movement, &Ant, &ColonyMember, &MapId, &PositionHistory, &mut TrailSense, &mut SteeringTarget, &mut SteeringWeights), (With<CarriedItem>, Without<PlayerControlled>)>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -577,7 +604,7 @@ fn ant_return_steering(
     let mut rng = rand::thread_rng();
     let noise = config.exploration_noise * 0.5;
 
-    for (transform, mut movement, ant, colony, map_id, history, mut sense) in &mut query {
+    for (transform, mut movement, ant, colony, map_id, history, mut sense, mut steering_target, mut steering_weights) in &mut query {
         if ant.state != AntState::Returning {
             continue;
         }
@@ -603,7 +630,13 @@ fn ant_return_steering(
         let dist_to_nest = to_nest.length();
 
         if dist_to_nest < SENSE_RANGE {
-            movement.direction = to_nest.normalize_or_zero();
+            let target_dir = to_nest.normalize_or_zero();
+            *steering_target = SteeringTarget::Direction { target: target_dir };
+            *steering_weights = SteeringWeights {
+                seek_weight: 1.0,
+                separation_weight: 0.5,
+                forward_weight: FORWARD_WEIGHT,
+            };
             *sense = TrailSense::BeelineNest;
             continue;
         }
@@ -643,12 +676,18 @@ fn ant_return_steering(
         let momentum = history.anti_backtrack(pos) * ANTI_BACKTRACK_WEIGHT;
 
         let noise_scale = if on_trail { 0.3 } else { 1.0 };
-        let mut new_dir = (fwd * FORWARD_WEIGHT + perturbed_fwd * noise_scale + bias + momentum)
+        let mut target_dir = (fwd * FORWARD_WEIGHT + perturbed_fwd * noise_scale + bias + momentum)
             .normalize_or_zero();
-        if new_dir == Vec2::ZERO {
-            new_dir = perturbed_fwd;
+        if target_dir == Vec2::ZERO {
+            target_dir = perturbed_fwd;
         }
-        movement.direction = new_dir;
+
+        *steering_target = SteeringTarget::Direction { target: target_dir };
+        *steering_weights = SteeringWeights {
+            seek_weight: 1.0,
+            separation_weight: 0.5,
+            forward_weight: FORWARD_WEIGHT,
+        };
     }
 }
 
