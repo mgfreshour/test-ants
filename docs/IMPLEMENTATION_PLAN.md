@@ -277,8 +277,8 @@ Ants autonomously dig and expand the nest using stigmergic construction pheromon
 - [x] Player dig zone designation boosts utility scoring for targeted cells
 - [x] Auto-expansion triggers when chambers are at capacity
 - [x] Ants avoid stacking via separation steering
-- [ ] Laden ants have tunnel priority over empty ants
-- [ ] Humidity parameter visibly affects dig spread and chamber size
+- [x] Laden ants have tunnel priority over empty ants
+- [x] Humidity parameter visibly affects dig spread and chamber size
 - [x] No deadlocks or wall-clipping with 50 concurrent nest ants
 - [x] Performance: 50 nest ants + digging + collision + pheromones at 60fps
 

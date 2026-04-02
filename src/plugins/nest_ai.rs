@@ -14,7 +14,7 @@ use crate::resources::colony::BehaviorSliders;
 use crate::resources::nest::{NestGrid, PlayerDigZones, TileStackRegistry, stack_position_offset, NEST_WIDTH};
 use crate::resources::nest_pathfinding::NestPathCache;
 use crate::resources::nest_pheromone::{
-    NestPheromoneGrid, LABEL_BROOD, LABEL_ENTRANCE, LABEL_FOOD_STORAGE, LABEL_QUEEN,
+    NestPheromoneConfig, NestPheromoneGrid, LABEL_BROOD, LABEL_ENTRANCE, LABEL_FOOD_STORAGE, LABEL_QUEEN,
 };
 use crate::resources::simulation::{SimClock, SimSpeed};
 use crate::sim_core::regressions;
@@ -1296,6 +1296,7 @@ fn apply_excavated_cells(
 fn construction_pheromone_deposit(
     clock: Res<SimClock>,
     time: Res<Time>,
+    phero_config: Res<NestPheromoneConfig>,
     mut map_query: Query<&mut NestPheromoneGrid, With<MapMarker>>,
     query: Query<(&Transform, &NestTask, &MapId)>,
 ) {
@@ -1304,7 +1305,8 @@ fn construction_pheromone_deposit(
     }
 
     let dt = time.delta_secs() * clock.speed.multiplier();
-    let deposit_rate = 0.15; // per second
+    // Humidity boosts deposit: humid → stronger deposits → tighter clusters.
+    let deposit_rate = crate::sim_core::nest_transitions::humidity_scaled_deposit(0.15, phero_config.humidity);
     let max_construction = 1.0;
 
     for (transform, task, map_id) in &query {
@@ -1340,11 +1342,13 @@ fn construction_pheromone_deposit(
 // ── Separation Steering ─────────────────────────────────────────────
 
 /// Gentle push-apart force for nest ants to prevent clumping in tunnels.
+/// Laden ants (carrying food/soil/brood) have movement priority — empty ants
+/// yield by receiving stronger push forces while laden ants resist being pushed.
 fn nest_separation_steering(
     clock: Res<SimClock>,
     time: Res<Time>,
     map_query: Query<&NestGrid, With<MapMarker>>,
-    mut query: Query<(Entity, &mut Transform, &MapId), With<NestTask>>,
+    mut query: Query<(Entity, &mut Transform, &MapId, &NestTask)>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -1354,19 +1358,20 @@ fn nest_separation_steering(
     let separation_radius = 8.0f32;
     let separation_strength = 30.0f32;
 
-    // Collect positions first to avoid borrow conflicts.
-    let positions: Vec<(Entity, Vec2, Entity)> = query
+    // Collect positions and carrying state to avoid borrow conflicts.
+    let positions: Vec<(Entity, Vec2, Entity, bool)> = query
         .iter()
-        .map(|(e, t, m)| (e, t.translation.truncate(), m.0))
+        .map(|(e, t, m, task)| (e, t.translation.truncate(), m.0, task.is_carrying()))
         .collect();
 
-    for (entity, mut transform, map_id) in &mut query {
+    for (entity, mut transform, map_id, task) in &mut query {
         let Ok(grid) = map_query.get(map_id.0) else { continue };
 
         let pos = transform.translation.truncate();
+        let is_laden = task.is_carrying();
         let mut push = Vec2::ZERO;
 
-        for &(other_entity, other_pos, other_map) in &positions {
+        for &(other_entity, other_pos, other_map, other_laden) in &positions {
             // Only push against ants on the same map.
             if other_entity == entity || other_map != map_id.0 {
                 continue;
@@ -1374,9 +1379,20 @@ fn nest_separation_steering(
             let diff = pos - other_pos;
             let dist = diff.length();
             if dist > 0.1 && dist < separation_radius {
-                // Inverse-distance push.
-                let force = diff.normalize() * (1.0 - dist / separation_radius);
-                push += force;
+                let base_force = diff.normalize() * (1.0 - dist / separation_radius);
+
+                // Tunnel traffic priority: empty ants yield to laden ants.
+                let weight = if !is_laden && other_laden {
+                    // Empty ant near a laden ant — yield strongly.
+                    2.0
+                } else if is_laden && !other_laden {
+                    // Laden ant near an empty ant — resist being pushed.
+                    0.3
+                } else {
+                    1.0
+                };
+
+                push += base_force * weight;
             }
         }
 

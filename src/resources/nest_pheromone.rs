@@ -60,6 +60,11 @@ pub struct NestPheromoneConfig {
     pub recruit_diffuse_rate: f32,
     /// Max intensity for trail/recruit pheromones underground.
     pub trail_recruit_max: f32,
+    /// Humidity level (0.0–1.0). Scales construction pheromone decay:
+    /// - High humidity (→1.0): slower decay → ants cluster → smaller chambers, more pillars.
+    /// - Low humidity (→0.0): faster decay → ants spread out → larger, open chambers.
+    /// Default 0.5 = neutral (no scaling).
+    pub humidity: f32,
 }
 
 impl Default for NestPheromoneConfig {
@@ -78,6 +83,7 @@ impl Default for NestPheromoneConfig {
             trail_diffuse_rate: 0.005,
             recruit_diffuse_rate: 0.04,
             trail_recruit_max: 200.0,
+            humidity: 0.5,
         }
     }
 }
@@ -167,8 +173,12 @@ impl NestPheromoneGrid {
             if cell.queen_signal < 0.001 {
                 cell.queen_signal = 0.0;
             }
-            // Construction pheromone decays fast
-            cell.construction *= 1.0 - config.construction_decay_rate;
+            // Construction pheromone decays — scaled by humidity.
+            let effective_decay = crate::sim_core::nest_transitions::humidity_scaled_decay(
+                config.construction_decay_rate,
+                config.humidity,
+            );
+            cell.construction *= 1.0 - effective_decay;
             if cell.construction < 0.001 {
                 cell.construction = 0.0;
             }

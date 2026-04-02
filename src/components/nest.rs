@@ -227,6 +227,34 @@ pub enum DigStep {
 }
 
 impl NestTask {
+    /// Whether the ant with this task is currently carrying an item (food, soil, or brood).
+    /// Used for tunnel traffic priority — laden ants get right-of-way.
+    pub fn is_carrying(&self) -> bool {
+        match self {
+            NestTask::FeedLarva { step, .. } => matches!(
+                step,
+                FeedStep::GoToBrood | FeedStep::FindLarva | FeedStep::DeliverFood
+            ),
+            NestTask::MoveBrood { step, .. } => matches!(
+                step,
+                MoveBroodStep::GoToBrood | MoveBroodStep::PlaceBrood
+            ),
+            NestTask::HaulFood { step } => matches!(
+                step,
+                HaulStep::GoToStorage | HaulStep::DropFood
+            ),
+            NestTask::AttendQueen { step } => matches!(
+                step,
+                AttendStep::GoToQueen | AttendStep::FeedQueen
+            ),
+            NestTask::Dig { step, .. } => matches!(
+                step,
+                DigStep::GoToMidden | DigStep::DropSoil
+            ),
+            NestTask::Idle { .. } => false,
+        }
+    }
+
     pub fn label(&self) -> &'static str {
         match self {
             NestTask::FeedLarva { .. } => "N",
