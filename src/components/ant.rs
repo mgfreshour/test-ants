@@ -34,6 +34,18 @@ pub enum AntJob {
     Unassigned,
 }
 
+impl AntJob {
+    /// Returns true if this job works underground (in nest).
+    pub fn is_underground_job(self) -> bool {
+        matches!(self, AntJob::Nurse | AntJob::Digger)
+    }
+
+    /// Returns true if this job works on surface.
+    pub fn is_surface_job(self) -> bool {
+        matches!(self, AntJob::Forager | AntJob::Defender | AntJob::Unassigned)
+    }
+}
+
 #[derive(Component)]
 pub struct Ant {
     pub caste: Caste,

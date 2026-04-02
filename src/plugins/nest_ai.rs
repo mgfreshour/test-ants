@@ -343,7 +343,7 @@ fn portal_transition(
     registry: Res<MapRegistry>,
     portal_query: Query<&MapPortal>,
     mut ant_query: Query<
-        (Entity, &mut Transform, &mut Ant, &ColonyMember, &mut MapId, &mut Visibility, Option<&NestTask>),
+        (Entity, &mut Transform, &mut Ant, &ColonyMember, &mut MapId, &mut Visibility, Option<&NestTask>, &AntJob),
         Without<PlayerControlled>,
     >,
     mut commands: Commands,
@@ -352,19 +352,24 @@ fn portal_transition(
         return;
     }
 
-    // Count total ants per colony and underground ants per nest map.
+    // Count total ants per colony and underground job-specific ants per nest map.
     let mut total_per_colony: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
-    let mut underground_per_nest: std::collections::HashMap<Entity, usize> = std::collections::HashMap::new();
-    for (_, _, _, colony, map_id, _, nest_task) in &ant_query {
+    let mut underground_jobs_per_nest: std::collections::HashMap<Entity, (usize, usize)> = std::collections::HashMap::new(); // (nurse_count, digger_count)
+    for (_, _, _, colony, map_id, _, nest_task, job) in &ant_query {
         *total_per_colony.entry(colony.colony_id).or_insert(0) += 1;
         if nest_task.is_some() {
-            *underground_per_nest.entry(map_id.0).or_insert(0) += 1;
+            let (nurse_count, digger_count) = underground_jobs_per_nest.entry(map_id.0).or_insert((0, 0));
+            match job {
+                AntJob::Nurse => *nurse_count += 1,
+                AntJob::Digger => *digger_count += 1,
+                _ => {}
+            }
         }
     }
 
     let mut rng = rand::thread_rng();
 
-    for (entity, mut transform, mut ant, colony, mut map_id, mut vis, _) in &mut ant_query {
+    for (entity, mut transform, mut ant, colony, mut map_id, mut vis, _, job) in &mut ant_query {
         for portal in &portal_query {
             if portal.map != map_id.0 {
                 continue;
@@ -384,9 +389,11 @@ fn portal_transition(
             if target_is_nest {
                 let is_following = ant.state == AntState::Following;
 
-                // Per-colony throttle from the target nest's sliders.
+                // Job-specific capacity counting: only Nurse and Digger count underground.
+                let (nurse_count, digger_count) = underground_jobs_per_nest.get(&portal.target_map).copied().unwrap_or((0, 0));
+                let current_underground = nurse_count + digger_count;
+
                 let total_ants = *total_per_colony.get(&colony.colony_id).unwrap_or(&0);
-                let current_underground = *underground_per_nest.get(&portal.target_map).unwrap_or(&0);
                 let desired_underground = sliders_query.get(portal.target_map).ok()
                     .map(|s| ((s.nurse + s.dig) * total_ants as f32).ceil() as usize)
                     .unwrap_or(0);
@@ -394,7 +401,7 @@ fn portal_transition(
                 if !is_following && !regressions::should_enter_nest(
                     current_underground,
                     desired_underground,
-                    ant.state == AntState::Foraging,
+                    *job,
                     rng.gen::<f32>(),
                     0.02,
                 ) {
@@ -424,7 +431,7 @@ fn portal_transition(
 }
 
 /// Nest ants that have been idle too long exit through a portal back to the surface.
-/// Only older ants (age > 200) leave; younger ants stay underground longer.
+/// Job-based exit logic: Forager and Defender ants exit after 5s idle; Nurse and Digger stay underground.
 fn nest_to_surface_transition(
     clock: Res<SimClock>,
     time: Res<Time>,
@@ -432,7 +439,7 @@ fn nest_to_surface_transition(
     portal_query: Query<&MapPortal>,
     mut commands: Commands,
     mut query: Query<
-        (Entity, &mut Transform, &mut Ant, &mut NestTask, &mut MapId, &mut Visibility),
+        (Entity, &mut Transform, &mut Ant, &mut NestTask, &mut MapId, &mut Visibility, &AntJob),
     >,
 ) {
     if clock.speed == SimSpeed::Paused {
@@ -442,7 +449,7 @@ fn nest_to_surface_transition(
     let dt = time.delta_secs() * clock.speed.multiplier();
     let mut rng = rand::thread_rng();
 
-    for (entity, mut transform, mut ant, mut task, mut map_id, mut vis) in &mut query {
+    for (entity, mut transform, mut ant, mut task, mut map_id, mut vis, job) in &mut query {
         // Only process ants currently in a nest.
         if map_id.0 == registry.surface {
             continue;
@@ -450,8 +457,15 @@ fn nest_to_surface_transition(
 
         if let NestTask::Idle { ref mut timer } = *task {
             *timer += dt;
-            // Older ants (age > 200) exit after being idle for a few seconds.
-            if ant.age > 200.0 && *timer > 5.0 {
+
+            // Job-based exit logic: Forager and Defender ants exit after 5s idle; underground jobs stay.
+            let should_exit = match job {
+                AntJob::Forager | AntJob::Defender => *timer > 5.0,   // Surface jobs exit after 5s idle
+                AntJob::Nurse | AntJob::Digger => false,              // Underground jobs never exit
+                AntJob::Unassigned => *timer > 10.0,                  // Unassigned gracefully ejected after 10s
+            };
+
+            if should_exit {
                 // Find an exit portal from this nest to the surface.
                 let exit_portal = portal_query.iter().find(|p| {
                     p.map == map_id.0 && p.target_map == registry.surface

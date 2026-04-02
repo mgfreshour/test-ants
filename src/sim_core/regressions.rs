@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use crate::components::ant::AntJob;
 
 pub fn should_reset_orphaned_returner(is_returning: bool, has_carried_item: bool) -> bool {
     is_returning && !has_carried_item
@@ -7,11 +8,12 @@ pub fn should_reset_orphaned_returner(is_returning: bool, has_carried_item: bool
 pub fn should_enter_nest(
     current_underground: usize,
     desired_underground: usize,
-    is_foraging: bool,
+    ant_job: AntJob,
     random_roll: f32,
     enter_chance: f32,
 ) -> bool {
-    current_underground < desired_underground && is_foraging && random_roll <= enter_chance
+    let is_underground_job = matches!(ant_job, AntJob::Nurse | AntJob::Digger);
+    current_underground < desired_underground && is_underground_job && random_roll <= enter_chance
 }
 
 pub fn select_available_dig_faces(
@@ -46,11 +48,24 @@ mod tests {
     }
 
     #[test]
-    fn portal_entry_respects_capacity_state_and_probability() {
-        assert!(should_enter_nest(2, 5, true, 0.01, 0.02));
-        assert!(!should_enter_nest(5, 5, true, 0.01, 0.02));
-        assert!(!should_enter_nest(2, 5, false, 0.01, 0.02));
-        assert!(!should_enter_nest(2, 5, true, 0.5, 0.02));
+    fn portal_entry_respects_capacity_job_and_probability() {
+        assert!(should_enter_nest(2, 5, AntJob::Nurse, 0.01, 0.02));
+        assert!(!should_enter_nest(5, 5, AntJob::Nurse, 0.01, 0.02));
+        assert!(!should_enter_nest(2, 5, AntJob::Forager, 0.01, 0.02));
+        assert!(!should_enter_nest(2, 5, AntJob::Nurse, 0.5, 0.02));
+    }
+
+    #[test]
+    fn underground_jobs_can_enter_nest() {
+        assert!(should_enter_nest(2, 5, AntJob::Nurse, 0.01, 0.02));
+        assert!(should_enter_nest(2, 5, AntJob::Digger, 0.01, 0.02));
+    }
+
+    #[test]
+    fn surface_jobs_cannot_enter_nest() {
+        assert!(!should_enter_nest(2, 5, AntJob::Forager, 0.01, 0.02));
+        assert!(!should_enter_nest(2, 5, AntJob::Defender, 0.01, 0.02));
+        assert!(!should_enter_nest(2, 5, AntJob::Unassigned, 0.01, 0.02));
     }
 
     #[test]
