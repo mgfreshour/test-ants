@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::ant::{Ant, Caste, ColonyMember, Health, Movement, PositionHistory, TrailSense};
+use crate::components::ant::{Ant, AntJob, Caste, ColonyMember, Health, Movement, PositionHistory, TrailSense};
 use crate::components::map::{MapId, MapKind, MapMarker, spawn_portal_pair};
 use crate::components::nest::{Brood, BroodStage, CellType, ChamberKind, NestTile, Queen, QueenHunger};
 use crate::plugins::ant_ai::ColonyFood;
@@ -456,6 +456,7 @@ fn brood_development(
                         Transform::from_xyz(hatch_pos.x + offset_x, hatch_pos.y + offset_y, 2.0),
                         Visibility::Hidden,
                         Ant { caste, state, age: 0.0, hunger: 0.0 },
+                        AntJob::Unassigned,
                         Movement::with_random_direction(speed, &mut rng),
                         health,
                         ColonyMember { colony_id },
