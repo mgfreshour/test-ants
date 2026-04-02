@@ -1581,9 +1581,9 @@ fn player_dig_zone_input(
         return;
     }
 
-    let Ok(window) = windows.get_single() else { return };
+    let Ok(window) = windows.single() else { return };
     let Some(cursor_pos) = window.cursor_position() else { return };
-    let Ok((camera, cam_transform)) = camera_query.get_single() else { return };
+    let Ok((camera, cam_transform)) = camera_query.single() else { return };
     let Ok(world_pos) = camera.viewport_to_world_2d(cam_transform, cursor_pos) else { return };
 
     let Some((gx, gy)) = world_to_nest_grid(world_pos) else { return };

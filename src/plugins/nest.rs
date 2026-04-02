@@ -207,18 +207,22 @@ fn cycle_map_view(
     registry: Res<MapRegistry>,
     map_kind_query: Query<&MapKind, With<MapMarker>>,
     mut saved: ResMut<SavedCameraStates>,
-    mut camera_query: Query<(&mut Transform, &mut OrthographicProjection), With<MainCamera>>,
+    mut camera_query: Query<(&mut Transform, &mut Projection), With<MainCamera>>,
     config: Res<SimConfig>,
 ) {
     if !input.just_pressed(KeyCode::Tab) {
         return;
     }
-    let Ok((mut cam_tf, mut proj)) = camera_query.get_single_mut() else { return };
+    let Ok((mut cam_tf, mut proj)) = camera_query.single_mut() else { return };
 
     // Save current camera state for outgoing map.
+    let current_scale = match *proj {
+        Projection::Orthographic(ref ortho) => ortho.scale,
+        _ => 1.0,
+    };
     saved.0.insert(active.entity, SavedCamera {
         position: cam_tf.translation.truncate(),
-        scale: proj.scale,
+        scale: current_scale,
     });
 
     // Advance to next map.
@@ -231,18 +235,24 @@ fn cycle_map_view(
     if let Some(cam) = saved.0.get(&next_entity) {
         cam_tf.translation.x = cam.position.x;
         cam_tf.translation.y = cam.position.y;
-        proj.scale = cam.scale;
+        if let Projection::Orthographic(ref mut ortho) = *proj {
+            ortho.scale = cam.scale;
+        }
     } else {
         match next_kind {
             MapKind::Surface => {
                 cam_tf.translation.x = config.world_width / 2.0;
                 cam_tf.translation.y = config.world_height / 2.0;
-                proj.scale = 1.0;
+                if let Projection::Orthographic(ref mut ortho) = *proj {
+                    ortho.scale = 1.0;
+                }
             }
             MapKind::Nest { .. } | MapKind::SpecialZone { .. } => {
                 cam_tf.translation.x = 0.0;
                 cam_tf.translation.y = 0.0;
-                proj.scale = NEST_CAMERA_SCALE;
+                if let Projection::Orthographic(ref mut ortho) = *proj {
+                    ortho.scale = NEST_CAMERA_SCALE;
+                }
             }
         }
     }

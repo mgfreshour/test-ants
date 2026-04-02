@@ -237,7 +237,7 @@ fn fix_orphaned_returners(
 /// Stable per-ant trail-follow decision. Returns true if this ant should follow
 /// trails during the current epoch, false if it should scout instead.
 fn should_follow_trail(entity: Entity, elapsed: f32) -> bool {
-    ant_logic::should_follow_trail(entity.index(), elapsed, TRAIL_EPOCH_RATE, TRAIL_FOLLOW_CHANCE)
+    ant_logic::should_follow_trail(entity.index_u32(), elapsed, TRAIL_EPOCH_RATE, TRAIL_FOLLOW_CHANCE)
 }
 
 /// Foraging ants: follow FOOD pheromone gradient or random walk, biased away from HOME.
@@ -971,7 +971,7 @@ fn update_state_labels(
             },
         };
 
-        for &child in children.iter() {
+        for child in children.iter() {
             if let Ok((mut text, mut text_color)) = label_query.get_mut(child) {
                 **text = letter.to_string();
                 *text_color = TextColor(color);

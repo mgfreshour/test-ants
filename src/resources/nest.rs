@@ -350,7 +350,7 @@ mod tests {
         let mut registry = TileStackRegistry::default();
         // Fill up with 5 items (the max per tile)
         for i in 0..5 {
-            registry.push((5, 5), Entity::from_raw(i));
+            registry.push((5, 5), Entity::from_raw_u32(i).unwrap());
         }
 
         let result = registry.find_available_tile(&grid, ChamberKind::FoodStorage);
@@ -361,16 +361,16 @@ mod tests {
     fn stack_registry_push_respects_limit() {
         let mut registry = TileStackRegistry::default();
         for i in 0..5 {
-            assert!(registry.push((0, 0), Entity::from_raw(i)).is_some());
+            assert!(registry.push((0, 0), Entity::from_raw_u32(i).unwrap()).is_some());
         }
         // 6th push should fail
-        assert!(registry.push((0, 0), Entity::from_raw(5)).is_none());
+        assert!(registry.push((0, 0), Entity::from_raw_u32(5).unwrap()).is_none());
     }
 
     #[test]
     fn stack_registry_remove_cleans_up_empty_stacks() {
         let mut registry = TileStackRegistry::default();
-        let e = Entity::from_raw(1);
+        let e = Entity::from_raw_u32(1).unwrap();
         registry.push((0, 0), e);
         assert!(registry.stacks.contains_key(&(0, 0)));
 

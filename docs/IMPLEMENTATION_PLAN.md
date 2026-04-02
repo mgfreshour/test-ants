@@ -383,18 +383,18 @@ Replace the text-based colony panel and keyboard-only controls with a proper `be
 > Open the game. A collapsible panel on the left shows colony stats at a glance: 47 workers, 8 soldiers, 12 brood, 35 food stored. Below that, four job distribution sliders — drag "Nurse" up and "Forage" auto-adjusts down. A "Caste Birthrates" section lets you boost soldier production to 40%. An "Aggression" section widens the patrol radius. Top toolbar has play/pause, speed selector showing "2x", and a "Surface/Underground" toggle button. Switch to underground view — the panel updates to show nest-specific stats and a "Dig Zones" toggle. Hover over any slider for a tooltip explaining what it does. Press Tab — view switches (hotkey still works). The panel is unobtrusive and can be collapsed to just an icon.
 
 ### Acceptance Criteria
-- [ ] `bevy_egui` integrated and rendering panels
-- [ ] Job distribution sliders read/write `BehaviorSliders`, auto-normalize to 1.0
-- [ ] Caste birthrate sliders read/write `CasteRatios`, auto-normalize to 1.0
-- [ ] Aggression settings control patrol/alarm behavior
-- [ ] Colony stats display matches actual simulation state
-- [ ] Sim speed and pause controllable via UI buttons
-- [ ] View toggle works from UI (Tab hotkey preserved)
-- [ ] Overlay controls replace keyboard cycling
-- [ ] Panel adapts content to current view (surface vs. underground)
-- [ ] Tooltips on all interactive elements
-- [ ] Old text-based colony panel removed
-- [ ] UI does not consume game input when not focused (WASD still moves ant)
+- [x] `bevy_egui` integrated and rendering panels
+- [x] Job distribution sliders read/write `BehaviorSliders`, auto-normalize to 1.0
+- [x] Caste birthrate sliders read/write `CasteRatios`, auto-normalize to 1.0
+- [x] Aggression settings control patrol/alarm behavior
+- [x] Colony stats display matches actual simulation state
+- [x] Sim speed and pause controllable via UI buttons
+- [x] View toggle works from UI (Tab hotkey preserved)
+- [x] Overlay controls replace keyboard cycling
+- [x] Panel adapts content to current view (surface vs. underground)
+- [x] Tooltips on all interactive elements
+- [x] Old text-based colony panel removed
+- [x] UI does not consume game input when not focused (WASD still moves ant)
 
 ---
 
@@ -421,16 +421,16 @@ The player-controlled ant gets a proper HUD with health bar, carried item displa
 > Player ant has a sleek bottom bar: green HP bar, "Carrying: 5.0 food" with icon, "3 followers" badge. Below it, action buttons: [Pick Up (E)] is grayed (already carrying), [Drop (Q)] is lit, [Trail (Shift)] glows when held, [Recruit (R)] shows a radius preview on hover, [Swap (X)] [Attack (Space)]. Click "Drop" near the nest — food deposited, button grays out, "Pick Up" lights up. Corner minimap shows ant clusters and a red colony dot across the map. A toast slides in: "Enemy ants spotted near food source!" then fades. Press `?` — hotkey reference card appears. Press backtick — colony panel slides shut for an uncluttered view.
 
 ### Acceptance Criteria
-- [ ] Player HP bar, hunger, carried item, follower count displayed visually
-- [ ] All player actions available as clickable buttons with hotkey labels
-- [ ] Buttons context-sensitive (grayed when unavailable)
-- [ ] Mouse clicks on action buttons trigger same behavior as hotkeys
-- [ ] Minimap shows world overview with clickable camera panning
-- [ ] Notification toasts appear for key game events
-- [ ] Old text HUD replaced with egui components
-- [ ] `?` opens hotkey reference overlay
-- [ ] Panel toggle with backtick, Escape closes overlays
-- [ ] UI does not interfere with game input when panels not focused
+- [x] Player HP bar, hunger, carried item, follower count displayed visually
+- [x] All player actions available as clickable buttons with hotkey labels
+- [x] Buttons context-sensitive (grayed when unavailable)
+- [x] Mouse clicks on action buttons trigger same behavior as hotkeys
+- [x] Minimap shows world overview with clickable camera panning
+- [x] Notification toasts appear for key game events
+- [x] Old text HUD replaced with egui components
+- [x] `?` opens hotkey reference overlay
+- [x] Panel toggle with backtick, Escape closes overlays
+- [x] UI does not interfere with game input when panels not focused
 
 ---
 
