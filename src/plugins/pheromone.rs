@@ -86,12 +86,19 @@ fn pheromone_evaporate_diffuse(
     clock: Res<SimClock>,
     pconfig: Res<PheromoneConfig>,
     mut grids: ResMut<ColonyPheromones>,
+    env: Res<crate::plugins::environment::EnvironmentState>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
     }
 
-    grids.evaporate_all(&pconfig.evaporation_rates);
+    // Rain accelerates evaporation
+    let mut evap_rates = pconfig.evaporation_rates.clone();
+    for rate in &mut evap_rates {
+        *rate *= env.evaporation_multiplier;
+    }
+
+    grids.evaporate_all(&evap_rates);
     grids.diffuse_all(&pconfig.diffusion_rates, pconfig.max_intensity);
 }
 
