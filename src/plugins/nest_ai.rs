@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::ant::{Ant, AntState, ColonyMember, Health, PlayerControlled, Underground};
+use crate::components::ant::{Ant, AntJob, AntState, ColonyMember, Health, PlayerControlled, Underground};
 use crate::components::map::{MapId, MapKind, MapMarker, MapPortal, PORTAL_RANGE};
 use crate::components::nest::{
     AttendStep, Brood, BroodStage, CarriedBy, CellType, ChamberKind, DigStep, FeedStep, FoodEntity,
@@ -20,12 +20,28 @@ use crate::resources::simulation::{SimClock, SimSpeed};
 use crate::sim_core::regressions;
 use crate::sim_core::nest_scoring::{choose_task, compute_scores, NestScoringInput, NestTaskChoice};
 use crate::sim_core::nest_transitions;
+use crate::sim_core::job_assignment::{self, JobAssignmentInput, JobCounts, JobRatios};
+use std::collections::HashMap;
 
 pub struct NestAiPlugin;
 
+#[derive(Resource)]
+struct JobAssignmentTimer {
+    timer: Timer,
+}
+
+impl Default for JobAssignmentTimer {
+    fn default() -> Self {
+        Self {
+            timer: Timer::from_seconds(3.0, TimerMode::Repeating),
+        }
+    }
+}
+
 impl Plugin for NestAiPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_initial_nest_ants)
+        app.init_resource::<JobAssignmentTimer>()
+            .add_systems(Startup, spawn_initial_nest_ants)
             .add_systems(
                 Update,
                 (
@@ -41,6 +57,7 @@ impl Plugin for NestAiPlugin {
                         portal_transition,
                         nest_to_surface_transition,
                         nest_ant_feeding,
+                        job_assignment_system,
                         nest_utility_scoring,
                     ).chain(),
                     (
@@ -238,11 +255,76 @@ fn spawn_initial_nest_ants(
                     age,
                     hunger: 0.0,
                 },
+                AntJob::Unassigned,
                 Health::worker(),
                 ColonyMember { colony_id: *colony_id },
                 MapId(map_entity),
                 NestTask::Idle { timer: 0.0 },
             ));
+        }
+    }
+}
+
+/// Assign and rebalance AntJob components to enforce BehaviorSliders ratios.
+/// Runs every ~3 seconds and uses age-based affinity + hysteresis to prevent oscillation.
+fn job_assignment_system(
+    time: Res<Time>,
+    mut timer: ResMut<JobAssignmentTimer>,
+    sliders_query: Query<&BehaviorSliders, With<MapMarker>>,
+    mut ant_query: Query<(&mut AntJob, &Ant, &ColonyMember)>,
+) {
+    timer.timer.tick(time.delta());
+    if !timer.timer.just_finished() {
+        return;
+    }
+
+    // Collect job data by colony
+    let mut ants_by_colony: HashMap<u32, Vec<(AntJob, f32)>> = HashMap::new();
+    for (job, ant, colony) in &ant_query {
+        ants_by_colony
+            .entry(colony.colony_id)
+            .or_insert_with(Vec::new)
+            .push((*job, ant.age));
+    }
+
+    // For each colony, compute desired ratios and compute input for reassignment logic
+    for (colony_id, ant_data) in ants_by_colony {
+        // Use default sliders if no slider component found
+        let default_sliders = BehaviorSliders::default();
+        let sliders = sliders_query.iter().next().unwrap_or(&default_sliders);
+
+        // Count current job distribution
+        let mut counts = JobCounts::default();
+        for (job, _) in &ant_data {
+            match job {
+                AntJob::Forager => counts.forager += 1,
+                AntJob::Nurse => counts.nurse += 1,
+                AntJob::Digger => counts.digger += 1,
+                AntJob::Defender => counts.defender += 1,
+                AntJob::Unassigned => counts.unassigned += 1,
+            }
+        }
+
+        let input = JobAssignmentInput {
+            total_ants: ant_data.len(),
+            target_ratios: JobRatios {
+                forage: sliders.forage,
+                nurse: sliders.nurse,
+                dig: sliders.dig,
+                defend: sliders.defend,
+            },
+            current_assignments: counts,
+        };
+
+        // Apply reassignments to ants in this colony
+        for (mut job, ant, colony) in &mut ant_query {
+            if colony.colony_id != colony_id {
+                continue;
+            }
+
+            if let Some(new_job) = job_assignment::should_reassign_ant(*job, ant.age, &input, 0.05) {
+                *job = new_job;
+            }
         }
     }
 }
