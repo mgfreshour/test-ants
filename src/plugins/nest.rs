@@ -81,7 +81,7 @@ fn setup_maps(mut commands: Commands, config: Res<SimConfig>) {
         nest_grid,
         phero_grid,
         NestPathCache::default(),
-        ColonyFood::default(),
+        ColonyFood { stored: 0.0 },
         BehaviorSliders::default(),
         PlayerDigZones::default(),
         crate::resources::nest::TileStackRegistry::default(),
@@ -110,7 +110,7 @@ fn setup_maps(mut commands: Commands, config: Res<SimConfig>) {
         red_nest_grid,
         red_phero_grid,
         NestPathCache::default(),
-        ColonyFood { stored: 20.0 }, // starting food so queen survives early
+        ColonyFood { stored: 0.0 },
         BehaviorSliders { forage: 0.5, nurse: 0.25, dig: 0.15, defend: 0.1 },
         crate::resources::nest::TileStackRegistry::default(),
     )).id();
@@ -269,7 +269,7 @@ fn sync_map_visibility(
 ) {
     let map_changed = active.is_changed();
     for (map_id, mut vis) in &mut query {
-        if !map_changed && !map_id.is_added() {
+        if !map_changed && !map_id.is_changed() {
             continue;
         }
         *vis = if map_id.0 == active.entity {

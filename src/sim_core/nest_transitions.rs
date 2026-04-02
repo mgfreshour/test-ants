@@ -154,8 +154,8 @@ mod tests {
     }
 
     #[test]
-    fn idle_never_carrying() {
-        assert!(!NestTask::Idle { timer: 0.0 }.is_carrying());
+    fn wander_never_carrying() {
+        assert!(!NestTask::Wander { scan_timer: 0.0, wander_time: 0.0 }.is_carrying());
     }
 
     // ── Humidity scaling tests ─────────────────────────────────────

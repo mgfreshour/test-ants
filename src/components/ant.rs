@@ -46,6 +46,31 @@ impl AntJob {
     }
 }
 
+/// Per-ant stimulus response thresholds for nest AI.
+/// Lower values = responds more easily to that stimulus type.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct StimulusThresholds {
+    pub feed_larva: f32,
+    pub move_brood: f32,
+    pub haul_food: f32,
+    pub attend_queen: f32,
+    pub dig: f32,
+}
+
+impl StimulusThresholds {
+    /// Create thresholds from job using pure logic in sim_core.
+    pub fn from_job(job: AntJob) -> Self {
+        let t = crate::sim_core::nest_stimuli::default_thresholds(job);
+        Self {
+            feed_larva: t.feed_larva,
+            move_brood: t.move_brood,
+            haul_food: t.haul_food,
+            attend_queen: t.attend_queen,
+            dig: t.dig,
+        }
+    }
+}
+
 #[derive(Component)]
 pub struct Ant {
     pub caste: Caste,

@@ -3,9 +3,9 @@ use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
 use rand::Rng;
 
-use crate::components::ant::{Ant, AntState, CarriedItem, ColonyMember, Health, PlayerControlled};
+use crate::components::ant::{Ant, AntState, CarriedItem, ColonyMember, Health, PlayerControlled, TrailSense};
 use crate::components::map::{MapKind, MapMarker};
-use crate::components::nest::NestTask;
+use crate::components::nest::{NestTask, Queen, QueenHunger};
 use crate::components::terrain::FoodSource;
 use crate::plugins::ant_ai::ColonyFood;
 use crate::plugins::combat::{GameResult, Spider};
@@ -107,8 +107,7 @@ fn colony_management_panel(
     mut env: ResMut<crate::plugins::environment::EnvironmentState>,
     food_query: Query<&ColonyFood, With<MapMarker>>,
     mut sliders_query: Query<&mut BehaviorSliders, With<MapMarker>>,
-    underground_count: Query<&NestTask>,
-    ant_query: Query<&ColonyMember, With<Ant>>,
+    ant_query: Query<(&Ant, &ColonyMember, Option<&TrailSense>, Option<&NestTask>)>,
 ) {
     if !panel_visible.0 {
         return;
@@ -158,8 +157,8 @@ fn colony_management_panel(
                 let pop = stats.workers + stats.soldiers + stats.drones;
                 let brood = stats.eggs + stats.larvae + stats.pupae;
                 let food_stored = food_query.get(registry.player_nest).map_or(0.0, |f| f.stored);
-                let underground = underground_count.iter().count();
-                let surface = ant_query.iter().filter(|c| c.colony_id == 0).count().saturating_sub(underground);
+                let underground = ant_query.iter().filter(|(_, c, _, task)| c.colony_id == 0 && task.is_some()).count();
+                let surface = ant_query.iter().filter(|(_, c, _, _)| c.colony_id == 0).count().saturating_sub(underground);
 
                 ui.label(format!("Population: {}", pop));
                 ui.label(format!("  Workers: {}", stats.workers));
@@ -308,12 +307,131 @@ fn colony_management_panel(
                             }
                         }
                     });
+                    ui.collapsing("Ant State Legend", |ui| {
+                        // Count surface ants by state for player colony
+                        let mut foraging = 0u32;
+                        let mut following_food = 0u32;
+                        let mut following_alarm = 0u32;
+                        let mut following_trail = 0u32;
+                        let mut beeline_food = 0u32;
+                        let mut returning = 0u32;
+                        let mut following_home = 0u32;
+                        let mut beeline_nest = 0u32;
+                        let mut defending = 0u32;
+                        let mut following_leader = 0u32;
+                        let mut idle = 0u32;
+
+                        for (ant, colony, sense, task) in &ant_query {
+                            if colony.colony_id != 0 || task.is_some() { continue; }
+                            let sense = sense.copied().unwrap_or_default();
+                            match ant.state {
+                                AntState::Foraging => match sense {
+                                    TrailSense::FollowingFood => following_food += 1,
+                                    TrailSense::FollowingAlarm => following_alarm += 1,
+                                    TrailSense::FollowingTrail => following_trail += 1,
+                                    TrailSense::BeelineFood => beeline_food += 1,
+                                    _ => foraging += 1,
+                                },
+                                AntState::Returning => match sense {
+                                    TrailSense::FollowingHome => following_home += 1,
+                                    TrailSense::BeelineNest => beeline_nest += 1,
+                                    _ => returning += 1,
+                                },
+                                AntState::Defending | AntState::Fighting | AntState::Attacking => defending += 1,
+                                AntState::Following => following_leader += 1,
+                                AntState::Idle => idle += 1,
+                                _ => {}
+                            }
+                        }
+
+                        let total_foraging = foraging + following_food + following_alarm + following_trail + beeline_food;
+                        ui.label(format!("Foraging: {}", total_foraging));
+                        let forage: &[(&str, egui::Color32, &str, u32)] = &[
+                            ("?", egui::Color32::from_rgb(255, 255, 255), "Searching", foraging),
+                            ("f", egui::Color32::from_rgb(255, 153, 26),  "Following food trail", following_food),
+                            ("a", egui::Color32::from_rgb(255, 51, 51),   "Following alarm", following_alarm),
+                            ("t", egui::Color32::from_rgb(204, 204, 51),  "Following player trail", following_trail),
+                            ("*", egui::Color32::from_rgb(51, 255, 51),   "Beeline to food", beeline_food),
+                        ];
+                        for &(letter, color, desc, count) in forage {
+                            ui.horizontal(|ui| {
+                                ui.colored_label(color, letter);
+                                ui.label(format!("{} ({})", desc, count));
+                            });
+                        }
+
+                        ui.separator();
+                        let total_returning = returning + following_home + beeline_nest;
+                        ui.label(format!("Returning: {}", total_returning));
+                        let ret: &[(&str, egui::Color32, &str, u32)] = &[
+                            ("r", egui::Color32::from_rgb(255, 255, 255), "Returning to nest", returning),
+                            ("h", egui::Color32::from_rgb(102, 153, 255), "Following home trail", following_home),
+                            ("^", egui::Color32::from_rgb(77, 255, 255),  "Beeline to nest", beeline_nest),
+                        ];
+                        for &(letter, color, desc, count) in ret {
+                            ui.horizontal(|ui| {
+                                ui.colored_label(color, letter);
+                                ui.label(format!("{} ({})", desc, count));
+                            });
+                        }
+
+                        ui.separator();
+                        ui.label("Other:");
+                        let other: &[(&str, egui::Color32, &str, u32)] = &[
+                            ("!", egui::Color32::from_rgb(255, 77, 77),   "Defending / Fighting", defending),
+                            (">", egui::Color32::from_rgb(128, 204, 255), "Following leader", following_leader),
+                            ("I", egui::Color32::from_rgb(255, 255, 255), "Idle", idle),
+                        ];
+                        for &(letter, color, desc, count) in other {
+                            ui.horizontal(|ui| {
+                                ui.colored_label(color, letter);
+                                ui.label(format!("{} ({})", desc, count));
+                            });
+                        }
+                    });
                 }
                 MapKind::Nest { .. } => {
                     ui.collapsing("Nest Overlay [N]", |ui| {
                         let mut vis = nest_overlay_state.visible;
                         if ui.checkbox(&mut vis, "Show overlay").changed() {
                             nest_overlay_state.visible = vis;
+                        }
+                    });
+                    ui.collapsing("Ant Task Legend", |ui| {
+                        // Count nest ants by task for player colony
+                        let mut nurse_count = 0u32;
+                        let mut move_count = 0u32;
+                        let mut haul_count = 0u32;
+                        let mut queen_count = 0u32;
+                        let mut dig_count = 0u32;
+                        let mut idle_count = 0u32;
+
+                        for (_, colony, _, task) in &ant_query {
+                            if colony.colony_id != 0 { continue; }
+                            let Some(task) = task else { continue; };
+                            match task {
+                                NestTask::FeedLarva { .. } => nurse_count += 1,
+                                NestTask::MoveBrood { .. } => move_count += 1,
+                                NestTask::HaulFood { .. } => haul_count += 1,
+                                NestTask::AttendQueen { .. } => queen_count += 1,
+                                NestTask::Dig { .. } => dig_count += 1,
+                                NestTask::Wander { .. } => idle_count += 1,
+                            }
+                        }
+
+                        let labels: &[(&str, egui::Color32, &str, u32)] = &[
+                            ("N", egui::Color32::from_rgb(204, 153, 255), "Nurse — feeding larvae", nurse_count),
+                            ("M", egui::Color32::from_rgb(255, 179, 204), "Move — relocating brood", move_count),
+                            ("H", egui::Color32::from_rgb(153, 230, 77),  "Haul — moving food", haul_count),
+                            ("Q", egui::Color32::from_rgb(255, 204, 51),  "Queen — attending queen", queen_count),
+                            ("D", egui::Color32::from_rgb(179, 128, 77),  "Dig — excavating tunnels", dig_count),
+                            ("W", egui::Color32::from_rgb(128, 153, 204), "Wander — patrolling", idle_count),
+                        ];
+                        for &(letter, color, desc, count) in labels {
+                            ui.horizontal(|ui| {
+                                ui.colored_label(color, letter);
+                                ui.label(format!("{} ({})", desc, count));
+                            });
                         }
                     });
                 }
@@ -340,6 +458,7 @@ fn player_hud_panel(
     recruit_mode: Res<RecruitMode>,
     mut action_writer: MessageWriter<PlayerAction>,
     player_query: Query<(&Ant, &Health, Option<&CarriedItem>), With<PlayerControlled>>,
+    queen_query: Query<(&QueenHunger, &Health, &ColonyMember), With<Queen>>,
 ) {
     if !player_mode.controlling {
         return;
@@ -407,6 +526,27 @@ fn player_hud_panel(
                     };
                     ui.label(format!("Mode: {} [V]", mode_label))
                         .on_hover_text("Recruit mode — V to toggle");
+
+                    // Queen hunger bar
+                    if let Some((queen_hunger, queen_health, _)) = queen_query.iter().find(|(_, _, c)| c.colony_id == 0) {
+                        ui.separator();
+                        let satiation = queen_hunger.satiation.clamp(0.0, 1.0);
+                        let hunger_frac = 1.0 - satiation;
+                        let color = if satiation > 0.5 {
+                            egui::Color32::from_rgb(180, 120, 200)
+                        } else if satiation > 0.2 {
+                            egui::Color32::from_rgb(200, 200, 40)
+                        } else {
+                            egui::Color32::from_rgb(200, 50, 50)
+                        };
+                        ui.vertical(|ui| {
+                            ui.label(format!("Queen: {:.0}%", hunger_frac * 100.0));
+                            let bar = egui::ProgressBar::new(hunger_frac)
+                                .fill(color)
+                                .desired_width(80.0);
+                            ui.add(bar);
+                        });
+                    }
                 } else {
                     ui.label("No ant controlled");
                 }

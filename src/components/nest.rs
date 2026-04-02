@@ -181,7 +181,8 @@ pub enum NestTask {
     HaulFood { step: HaulStep },
     AttendQueen { step: AttendStep },
     Dig { step: DigStep, target_cell: Option<GridPos>, dig_timer: f32 },
-    Idle { timer: f32 },
+    /// Ant patrols the nest, scanning for stimuli to respond to.
+    Wander { scan_timer: f32, wander_time: f32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,7 +252,7 @@ impl NestTask {
                 step,
                 DigStep::GoToMidden | DigStep::DropSoil
             ),
-            NestTask::Idle { .. } => false,
+            NestTask::Wander { .. } => false,
         }
     }
 
@@ -262,7 +263,7 @@ impl NestTask {
             NestTask::HaulFood { .. } => "H",
             NestTask::AttendQueen { .. } => "Q",
             NestTask::Dig { .. } => "D",
-            NestTask::Idle { .. } => "I",
+            NestTask::Wander { .. } => "W",
         }
     }
 
@@ -273,7 +274,7 @@ impl NestTask {
             NestTask::HaulFood { .. } => Color::srgb(0.6, 0.9, 0.3),
             NestTask::AttendQueen { .. } => Color::srgb(1.0, 0.8, 0.2),
             NestTask::Dig { .. } => Color::srgb(0.7, 0.5, 0.3),
-            NestTask::Idle { .. } => Color::srgba(1.0, 1.0, 1.0, 0.4),
+            NestTask::Wander { .. } => Color::srgb(0.5, 0.6, 0.8),
         }
     }
 }

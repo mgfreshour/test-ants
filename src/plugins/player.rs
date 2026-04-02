@@ -315,7 +315,7 @@ fn player_portal_transition(
         *vis = Visibility::Hidden;
 
         if entering_nest {
-            commands.entity(entity).insert(NestTask::Idle { timer: 0.0 });
+            commands.entity(entity).insert(NestTask::Wander { scan_timer: 0.0, wander_time: 0.0 });
             ant.state = AntState::Following;
         } else {
             commands.entity(entity).remove::<NestTask>();
