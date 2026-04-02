@@ -197,14 +197,14 @@ Replace the two separate movement systems (continuous direction-steering on surf
 | 15.1 | Create `src/plugins/steering.rs` — new plugin: `SteeringPlugin` | 2h | ✓ |
 | 15.2 | Create `src/sim_core/steering.rs` — pure steering math (obstacle avoidance, waypoint following) | 5h | ✓ |
 | 15.3 | Define `SteeringTarget` enum (Direction/Path/None) and `SteeringWeights` struct | 3h | ✓ |
-| 15.4 | Surface ants: refactor `ant_forage_steering`, `ant_return_steering` to output `SteeringTarget::Direction` | 4h | In Progress |
+| 15.4 | Surface ants: refactor `ant_forage_steering`, `ant_return_steering` to output `SteeringTarget::Direction` | 4h | ✓ |
 | 15.5 | Nest ants: convert `NestPath` to `SteeringTarget::Path` (waypoints to world coords) | 4h | ✓ |
 | 15.6 | Single `apply_steering` system reads `SteeringTarget` + `Movement` and produces final velocity | 5h | ✓ |
-| 15.7 | Merge `nest_separation_steering` into steering system as `separation` weight | 3h | Ready |
+| 15.7 | Merge `nest_separation_steering` into steering system as `separation` weight | 3h | ✓ |
 | 15.8 | Add obstacle avoidance hook (empty for now, ready for surface obstacles) | 2h | ✓ |
 | 15.9 | Pure steering math tests | 4h | ✓ (7 tests, all pass) |
-| 15.10 | Verify surface foraging behavior unchanged | 2h | In Progress |
-| 15.11 | Verify nest pathfinding movement unchanged | 2h | In Progress |
+| 15.10 | Verify surface foraging behavior unchanged | 2h | ✓ |
+| 15.11 | Verify nest pathfinding movement unchanged | 2h | ✓ |
 
 ### Progress
 
@@ -231,9 +231,14 @@ Replace the two separate movement systems (continuous direction-steering on surf
 - ✓ Plugin registration: `SteeringPlugin` added to main.rs plugin list
 - ✓ Backward compatibility: Old direction-setting systems still work (no-op in steering plugin)
 
-**In Progress:**
-- Surface steering refactor: Need to update `ant_forage_steering`, `ant_return_steering`, recruit-following systems
-- Behavior verification: Both maps currently work but surface ants still use legacy direction-setting
+**Completed:**
+- Surface steering refactor: All four steering systems now output `SteeringTarget::Direction`
+  - `ant_forage_steering`: Computes target based on food beeline or pheromone gradient
+  - `ant_return_steering`: Computes target based on nest beeline or home pheromone gradient
+  - `ant_follow_recruit_steering`: Computes target based on recruit pheromone gradient
+  - `ant_attack_recruit_steering`: Computes target based on enemy position or attack pheromone gradient
+- Unified steering fully operational: Both maps use the same `apply_steering` system
+- Behavior verified: Surface foraging and nest pathfinding unchanged
 
 **Files touched**:
 - `src/sim_core/steering.rs` (new, 220 lines)
@@ -247,23 +252,30 @@ Replace the two separate movement systems (continuous direction-steering on surf
 - `src/plugins/nest_navigation.rs` (convert_nest_paths_to_steering system)
 
 ### Demo
-> Nest ants now use unified steering system — pathfinding behavior unchanged. Surface ants still forage using legacy direction-setting (will be unified in next step). Both use the same foundation. Toggle to surface view, then underground — nest pathfinding and collision separation work via new system.
+> **Sprint 15 Complete!** Both surface and nest ants use the unified steering system. Toggle to surface view — foraging and returning behavior unchanged, using new steering system. Toggle to underground — pathfinding and collision separation work identically. All ants compute steering targets (Direction for surface, Path for nest) and feed them into the unified `apply_steering` system. Movement feels identical to before the refactor, but the architecture is now unified and ready for future obstacles.
 
 ### Acceptance Criteria
 - [x] `SteeringTarget` and `SteeringWeights` components exist
-- [ ] Surface steering systems output `SteeringTarget` (in progress)
+- [x] Surface steering systems output `SteeringTarget`
 - [x] Nest pathfinding uses `SteeringTarget::Path`
-- [x] Single `apply_steering` system drives nest movement
+- [x] Single `apply_steering` system drives all movement
+- [x] Separation steering merged (O(n²) neighbor queries per frame)
 - [x] Obstacle avoidance hook ready
 - [x] Pure steering tests pass (7/7)
-- [ ] Surface + nest behavior unchanged (pending surface refactor)
+- [x] Surface + nest behavior unchanged (regression verified)
+
+**Commits:**
+- c8cd8ac: Sprint 15 - Unified steering foundation (WIP)
+- 254139d: Sprint 15 - Surface steering refactor to SteeringTarget
 
 ---
 
 ## Sprint 16: Split AI Files into Domain Modules (Weeks 31-32)
 
+> **Status**: Planned — deferred to next session for careful execution due to large refactor scope (2800+ combined lines, many interdependencies). The full refactoring requires careful module design to maintain correctness across splitting.
+
 ### Goal
-Break `ant_ai.rs` (982 lines) and `nest_ai.rs` (1712 lines) into focused modules before the final unification. Pure refactor — no behavior changes.
+Break `ant_ai.rs` (1023 lines) and `nest_ai.rs` (1826 lines) into focused modules before the final unification. Pure refactor — no behavior changes.
 
 ### Tasks
 
