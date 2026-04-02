@@ -16,7 +16,7 @@ jobs:
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
       - name: Run fast simulation unit tests
-        run: cargo test sim_core::
+        run: cargo test sim_core
 
   simulation-integration:
     name: Slower Simulation Integration Suite
