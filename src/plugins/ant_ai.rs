@@ -925,7 +925,7 @@ struct StateLabel;
 
 fn spawn_state_labels(
     mut commands: Commands,
-    query: Query<Entity, (With<Ant>, Without<Children>)>,
+    query: Query<Entity, (With<Ant>, Without<Children>, Without<NestTask>)>,
 ) {
     for entity in &query {
         let child = commands.spawn((
@@ -943,7 +943,7 @@ fn spawn_state_labels(
 }
 
 fn update_state_labels(
-    ant_query: Query<(&Ant, Option<&TrailSense>, &Children)>,
+    ant_query: Query<(&Ant, Option<&TrailSense>, &Children), Without<NestTask>>,
     mut label_query: Query<(&mut Text2d, &mut TextColor), With<StateLabel>>,
 ) {
     for (ant, sense, children) in &ant_query {
