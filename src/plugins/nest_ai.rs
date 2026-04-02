@@ -29,18 +29,20 @@ impl Plugin for NestAiPlugin {
             .add_systems(
                 Update,
                 (
-                    apply_flood_damage,
-                    apply_brood_fed,
-                    apply_brood_relocated,
-                    apply_deferred_zone_expansions,
-                    cleanup_orphaned_carried_items,
-                    update_carried_item_positions,
-                    apply_zone_expansions,
-                    apply_excavated_cells,
-                    portal_transition,
-                    nest_to_surface_transition,
-                    nest_ant_feeding,
-                    nest_utility_scoring,
+                    (
+                        apply_flood_damage,
+                        apply_brood_fed,
+                        apply_brood_relocated,
+                        apply_deferred_zone_expansions,
+                        cleanup_orphaned_carried_items,
+                        update_carried_item_positions,
+                        apply_zone_expansions,
+                        apply_excavated_cells,
+                        portal_transition,
+                        nest_to_surface_transition,
+                        nest_ant_feeding,
+                        nest_utility_scoring,
+                    ).chain(),
                     (
                         advance_feed_task,
                         advance_move_brood_task,
@@ -48,14 +50,13 @@ impl Plugin for NestAiPlugin {
                         advance_attend_queen_task,
                         advance_dig_task,
                         advance_idle_task,
+                        construction_pheromone_deposit,
+                        nest_separation_steering,
+                        nest_grid_collision,
+                        player_dig_zone_input,
+                        nest_task_labels,
                     ).chain(),
-                    construction_pheromone_deposit,
-                    nest_separation_steering,
-                    nest_grid_collision,
-                    player_dig_zone_input,
-                    nest_task_labels,
-                )
-                    .chain(),
+                ).chain(),
             );
     }
 }
