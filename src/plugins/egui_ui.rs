@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
+use rand::Rng;
 
 use crate::components::ant::{Ant, AntState, CarriedItem, ColonyMember, Health, PlayerControlled};
 use crate::components::map::{MapKind, MapMarker};
@@ -462,6 +463,7 @@ fn minimap_panel(
     mut contexts: EguiContexts,
     active: Res<ActiveMap>,
     config: Res<SimConfig>,
+    env: Res<crate::plugins::environment::EnvironmentState>,
     ant_query: Query<(&Transform, &ColonyMember), With<Ant>>,
     food_query: Query<(&Transform, &FoodSource)>,
     spider_query: Query<&Transform, With<Spider>>,
@@ -490,8 +492,19 @@ fn minimap_panel(
 
             let rect = response.rect;
 
-            // Background
-            painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(20, 30, 15));
+            // Background — green grass, darkened at night, blue-shifted in rain
+            let dist_from_noon = (env.time_of_day - 0.5).abs() * 2.0;
+            let night_factor = dist_from_noon.clamp(0.0, 1.0);
+            let base_r = (55.0 * (1.0 - night_factor * 0.6)) as u8;
+            let base_g = (110.0 * (1.0 - night_factor * 0.6)) as u8;
+            let base_b = (40.0 * (1.0 - night_factor * 0.5)) as u8;
+            let (bg_r, bg_g, bg_b) = if env.is_raining {
+                // Shift towards blue-grey when raining
+                (base_r.saturating_sub(10), base_g.saturating_sub(10), base_b.saturating_add(30))
+            } else {
+                (base_r, base_g, base_b)
+            };
+            painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(bg_r, bg_g, bg_b));
 
             // Nest marker
             let nest_x = rect.left() + config.nest_position.x * scale_x;
@@ -525,6 +538,52 @@ fn minimap_panel(
                     2.5,
                     egui::Color32::from_rgb(120, 80, 40),
                 );
+            }
+
+            // Hazard zones
+            for (_id, hazard) in &env.active_hazards {
+                use crate::plugins::environment::HazardKind;
+                let hx = rect.left() + hazard.position.x * scale_x;
+                let hy = rect.bottom() - hazard.position.y * scale_y;
+                let life_frac = (hazard.remaining_time / hazard.max_time).clamp(0.0, 1.0);
+
+                let (color, half_w, half_h) = match hazard.kind {
+                    HazardKind::Footstep => (
+                        egui::Color32::from_rgba_unmultiplied(80, 60, 40, (160.0 * life_frac) as u8),
+                        hazard.radius * scale_x,
+                        hazard.radius * 1.25 * scale_y,
+                    ),
+                    HazardKind::Lawnmower => (
+                        egui::Color32::from_rgba_unmultiplied(220, 50, 30, 180),
+                        minimap_size / 2.0, // spans most of the width
+                        hazard.radius * scale_y,
+                    ),
+                    HazardKind::Pesticide => (
+                        egui::Color32::from_rgba_unmultiplied(120, 180, 30, 140),
+                        hazard.radius * scale_x,
+                        hazard.radius * scale_y,
+                    ),
+                };
+
+                let hazard_rect = egui::Rect::from_center_size(
+                    egui::pos2(hx, hy),
+                    egui::vec2(half_w * 2.0, half_h * 2.0),
+                );
+                painter.rect_filled(hazard_rect, 1.0, color);
+            }
+
+            // Rain dots on minimap
+            if env.is_raining {
+                let mut rng = rand::thread_rng();
+                for _ in 0..6 {
+                    let rx = rect.left() + rng.gen_range(0.0..minimap_size);
+                    let ry = rect.top() + rng.gen_range(0.0..minimap_size);
+                    painter.circle_filled(
+                        egui::pos2(rx, ry),
+                        1.0,
+                        egui::Color32::from_rgba_unmultiplied(100, 150, 255, 120),
+                    );
+                }
             }
 
             // Ants (sample to avoid performance issues)
