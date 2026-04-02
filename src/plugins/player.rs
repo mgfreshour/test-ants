@@ -820,16 +820,22 @@ fn update_follower_count(
 
 fn camera_follow_player(
     mode: Res<PlayerMode>,
-    player_query: Query<&Transform, (With<PlayerControlled>, Without<MainCamera>)>,
+    active: Res<crate::resources::active_map::ActiveMap>,
+    player_query: Query<(&Transform, &crate::components::map::MapId), (With<PlayerControlled>, Without<MainCamera>)>,
     mut camera_query: Query<&mut Transform, With<MainCamera>>,
 ) {
     if !mode.follow_camera {
         return;
     }
 
-    let Ok(player_tf) = player_query.single() else {
+    let Ok((player_tf, player_map)) = player_query.single() else {
         return;
     };
+
+    // Only follow the player when viewing the map they're on.
+    if player_map.0 != active.entity {
+        return;
+    }
 
     let Ok(mut cam_tf) = camera_query.single_mut() else {
         return;
