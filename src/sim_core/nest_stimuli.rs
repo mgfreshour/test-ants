@@ -114,18 +114,23 @@ pub fn queen_stimulus_strength(queen_hunger: f32, queen_signal: f32) -> f32 {
 /// (see `queen_hunger_signal` in queen_scoring.rs). Workers read only
 /// the local signal at their grid position — spatial falloff is emergent.
 ///
-/// The curve needs to be generous because diffusion attenuates the signal
-/// significantly over even a few cells. A worker 3–4 cells from a hungry
-/// queen might see signal ~0.2–0.3; this must still exceed the nurse
-/// attend_queen threshold of 0.2.
+/// The curve must be aggressive because diffusion attenuates the signal
+/// heavily over a few cells. Without amplification, proximity-based
+/// stimuli (move brood, feed larva) always win on margin, and the queen
+/// starves. The old direct-query system had no attenuation; this curve
+/// compensates.
 pub fn queen_stimulus_from_signal(queen_signal: f32) -> f32 {
     let s = queen_signal.clamp(0.0, 1.0);
-    // Suppress only the fed-queen baseline (~0.15). Any signal above
-    // that indicates real hunger, amplified to keep workers responsive.
-    let effective = (s - 0.10).max(0.0) / 0.90;
-    // Square-root curve: boosts weak-to-mid signals so diffused values
-    // still clear thresholds while preserving ordering.
-    (effective.sqrt()).clamp(0.0, 1.0)
+    // Dead zone: signal at or below the fed-queen baseline produces nothing.
+    if s <= 0.10 {
+        return 0.0;
+    }
+    // Map remaining range [0.10, 1.0] → [0.0, 1.0] then amplify.
+    let effective = (s - 0.10) / 0.90;
+    // Strong amplification: even a modest signal (~0.2) after diffusion
+    // must produce stimulus that competes with proximity-based brood tasks.
+    // 0.3 base + 0.7 scaled ensures hungry-queen stimulus dominates.
+    (0.3 + 0.7 * effective.sqrt()).clamp(0.0, 1.0)
 }
 
 /// Stimulus strength for loose food at entrance.
@@ -344,6 +349,28 @@ mod tests {
             stimulus > nurse_threshold,
             "stimulus {stimulus} from diffused signal {diffused} (emitted {emitted}) \
              must exceed nurse threshold {nurse_threshold}"
+        );
+    }
+
+    #[test]
+    fn queen_stimulus_margin_beats_move_brood_nearby() {
+        // Regression: wandering ants prioritised moving eggs over feeding
+        // a starving queen because brood_stimulus_strength gave high
+        // margins. Queen stimulus margin must win at comparable distances.
+        use crate::sim_core::queen_scoring::queen_hunger_signal;
+        let nurse = default_thresholds(AntJob::Nurse);
+
+        // Hungry queen, worker ~2 cells away
+        let emitted = queen_hunger_signal(0.7, 1.0);
+        let diffused = emitted * 0.45;
+        let queen_margin = queen_stimulus_from_signal(diffused) - nurse.attend_queen;
+
+        // Unrelocated brood at dist 2
+        let brood_margin = brood_stimulus_strength(2.0) - nurse.move_brood;
+
+        assert!(
+            queen_margin > brood_margin,
+            "queen margin {queen_margin} must beat brood margin {brood_margin}"
         );
     }
 }
