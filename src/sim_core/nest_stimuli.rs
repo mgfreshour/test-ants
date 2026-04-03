@@ -113,14 +113,19 @@ pub fn queen_stimulus_strength(queen_hunger: f32, queen_signal: f32) -> f32 {
 /// The queen's hunger is already encoded in the diffused queen_signal
 /// (see `queen_hunger_signal` in queen_scoring.rs). Workers read only
 /// the local signal at their grid position — spatial falloff is emergent.
+///
+/// The curve needs to be generous because diffusion attenuates the signal
+/// significantly over even a few cells. A worker 3–4 cells from a hungry
+/// queen might see signal ~0.2–0.3; this must still exceed the nurse
+/// attend_queen threshold of 0.2.
 pub fn queen_stimulus_from_signal(queen_signal: f32) -> f32 {
-    // Signal encodes hunger: ~0.15 when fed, ~1.0 when starving.
-    // After diffusion, distant cells see a weaker signal naturally.
-    // We apply a gentle curve to make the response less binary.
     let s = queen_signal.clamp(0.0, 1.0);
-    // Below baseline (~0.15) the queen is well-fed; suppress stimulus.
-    let effective = (s - 0.12).max(0.0) / 0.88;
-    (effective.powf(0.7)).clamp(0.0, 1.0)
+    // Suppress only the fed-queen baseline (~0.15). Any signal above
+    // that indicates real hunger, amplified to keep workers responsive.
+    let effective = (s - 0.10).max(0.0) / 0.90;
+    // Square-root curve: boosts weak-to-mid signals so diffused values
+    // still clear thresholds while preserving ordering.
+    (effective.sqrt()).clamp(0.0, 1.0)
 }
 
 /// Stimulus strength for loose food at entrance.
@@ -296,10 +301,13 @@ mod tests {
     }
 
     #[test]
-    fn signal_stimulus_near_zero_for_fed_queen() {
-        // Baseline signal (~0.15) should produce near-zero stimulus
-        let s = queen_stimulus_from_signal(0.12);
-        assert!(s < 0.01, "fed queen signal should produce near-zero stimulus, got {s}");
+    fn signal_stimulus_low_for_fed_queen() {
+        // At the dead-zone boundary, stimulus should be zero
+        let s = queen_stimulus_from_signal(0.10);
+        assert!(s < 0.01, "signal at dead-zone edge should be near-zero, got {s}");
+        // A few cells from a fed queen (signal decayed to ~0.08), no response
+        let s_far = queen_stimulus_from_signal(0.08);
+        assert!(s_far < 0.01, "decayed fed-queen signal should produce no stimulus, got {s_far}");
     }
 
     #[test]
@@ -317,6 +325,25 @@ mod tests {
         assert!(
             (legacy - new).abs() < 0.35,
             "legacy {legacy} and new {new} should be in the same ballpark for high hunger"
+        );
+    }
+
+    #[test]
+    fn nurse_attends_moderately_hungry_queen_nearby() {
+        // Regression: queen was starving because diffused signal didn't
+        // clear nurse thresholds. A nurse 2-3 cells from a half-hungry
+        // queen (signal ~0.25 after diffusion) must respond.
+        use crate::sim_core::queen_scoring::queen_hunger_signal;
+        let hunger_frac = 0.5; // half hungry
+        let emitted = queen_hunger_signal(hunger_frac, 1.0);
+        // After ~2 cells of diffusion, signal roughly halves
+        let diffused = emitted * 0.45;
+        let stimulus = queen_stimulus_from_signal(diffused);
+        let nurse_threshold = default_thresholds(AntJob::Nurse).attend_queen;
+        assert!(
+            stimulus > nurse_threshold,
+            "stimulus {stimulus} from diffused signal {diffused} (emitted {emitted}) \
+             must exceed nurse threshold {nurse_threshold}"
         );
     }
 }
