@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use crate::components::ant::{PlayerControlled, StimulusThresholds};
 use crate::components::map::{MapId, MapMarker};
-use crate::components::nest::{AttendStep, Brood, BroodStage, DigStep, FeedStep, FoodEntity, HaulStep, MoveBroodStep, NestTask, Queen, QueenHunger, StackedItem};
+use crate::components::nest::{AttendStep, Brood, BroodStage, DigStep, FeedStep, FoodEntity, HaulStep, MoveBroodStep, NestPath, NestTask, Queen, QueenHunger, StackedItem};
 use crate::plugins::ant_ai::ColonyFood;
 use crate::plugins::nest_navigation::world_to_nest_grid;
 use crate::resources::nest::{NestGrid, PlayerDigZones};
@@ -20,6 +20,7 @@ const SCAN_INTERVAL: f32 = 0.5;
 /// a stimulus exceeds their personal threshold (set by AntJob).
 /// Replaces the old global utility scoring system.
 pub(super) fn stimulus_scan(
+    mut commands: Commands,
     clock: Res<SimClock>,
     map_query: Query<(&NestGrid, &NestPheromoneGrid, &ColonyFood, Option<&PlayerDigZones>), With<MapMarker>>,
     brood_query: Query<(Entity, &Transform, &Brood, &MapId)>,
@@ -48,7 +49,7 @@ pub(super) fn stimulus_scan(
         }
     }
 
-    for (_entity, transform, map_id, mut task, thresholds) in &mut query {
+    for (entity, transform, map_id, mut task, thresholds) in &mut query {
         // Only scan wandering ants whose scan timer has elapsed.
         let scan_ready = match &*task {
             NestTask::Wander { scan_timer, .. } => *scan_timer >= SCAN_INTERVAL,
@@ -182,6 +183,9 @@ pub(super) fn stimulus_scan(
         }
 
         if let Some(idx) = best_idx {
+            // Remove any leftover NestPath from wandering so the new task
+            // starts fresh with pathfinding to its own destination.
+            commands.entity(entity).remove::<NestPath>();
             *task = match best_strength[idx].0 {
                 nest_stimuli::StimulusType::HungryLarva => NestTask::FeedLarva {
                     step: FeedStep::GoToStorage,

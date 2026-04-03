@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use rand::Rng;
 
 use crate::components::ant::{Ant, AntJob, AntState, Caste, ColonyMember, Health, Movement, PositionHistory, StimulusThresholds, SteeringTarget, SteeringWeights, TrailSense};
-use crate::components::map::{MapId, MapKind, MapMarker, spawn_portal_pair};
+use crate::components::map::{MapId, MapKind, MapMarker};
 use crate::components::nest::{Brood, BroodStage, CellType, ChamberKind, NestTask, Queen, QueenHunger};
 use crate::plugins::ant_ai::ColonyFood;
 use crate::plugins::camera::MainCamera;
@@ -43,10 +43,6 @@ impl Plugin for NestPlugin {
             // Map entities created in PreStartup so Startup systems can query them.
             .add_systems(PreStartup, setup_maps)
             .add_systems(
-                Startup,
-                spawn_queen.after(setup_maps),
-            )
-            .add_systems(
                 Update,
                 (
                     cycle_map_view,
@@ -66,7 +62,7 @@ impl Plugin for NestPlugin {
 /// Spawns surface and player-nest map entities, portals between them,
 /// and inserts `ActiveMap`, `MapRegistry`, and `SavedCameraStates`.
 /// Runs in PreStartup so all Startup systems can query the map entities.
-fn setup_maps(mut commands: Commands, config: Res<SimConfig>) {
+fn setup_maps(mut commands: Commands, _config: Res<SimConfig>) {
     // Surface map — no grid/pheromone components needed.
     let surface = commands.spawn((MapMarker, MapKind::Surface)).id();
 
@@ -87,17 +83,7 @@ fn setup_maps(mut commands: Commands, config: Res<SimConfig>) {
         crate::resources::nest::TileStackRegistry::default(),
     )).id();
 
-    // Portal pair: surface nest entrance ↔ underground entrance cell.
-    let cx = NEST_WIDTH / 2;
-    let underground_entrance = nest_grid_to_world(cx, 0);
-    spawn_portal_pair(
-        &mut commands,
-        surface,
-        config.nest_position,
-        player_nest,
-        underground_entrance,
-        Some(0), // only player colony (id=0)
-    );
+    // Portal pairs are now wired from LDtk PortalPoint entities (see ldtk_maps.rs).
 
     // Red colony nest — identical layout, AI-controlled sliders.
     let red_nest_grid = NestGrid::default();
@@ -115,19 +101,6 @@ fn setup_maps(mut commands: Commands, config: Res<SimConfig>) {
         crate::resources::nest::TileStackRegistry::default(),
     )).id();
 
-    let red_nest_surface_pos = Vec2::new(
-        config.world_width - config.nest_position.x,
-        config.world_height - config.nest_position.y,
-    );
-    spawn_portal_pair(
-        &mut commands,
-        surface,
-        red_nest_surface_pos,
-        red_nest,
-        underground_entrance, // same grid layout, different map entity
-        Some(1), // only red colony NPCs (id=1)
-    );
-
     commands.insert_resource(ActiveMap { entity: surface, kind: MapKind::Surface });
     commands.insert_resource(MapRegistry {
         surface,
@@ -138,37 +111,7 @@ fn setup_maps(mut commands: Commands, config: Res<SimConfig>) {
     commands.insert_resource(SavedCameraStates::default());
 }
 
-fn spawn_queen(
-    mut commands: Commands,
-    map_query: Query<(Entity, &MapKind), With<MapMarker>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-) {
-    let cx = NEST_WIDTH / 2;
-    let queen_center = nest_grid_to_world(cx, 16);
-
-    for (map_entity, kind) in &map_query {
-        let MapKind::Nest { colony_id } = kind else { continue };
-
-        let color = if *colony_id == 0 {
-            Color::srgb(0.8, 0.6, 0.1) // gold
-        } else {
-            Color::srgb(0.8, 0.2, 0.1) // red-gold
-        };
-
-        commands.spawn((
-            Mesh2d(meshes.add(Circle::new(6.0))),
-            MeshMaterial2d(materials.add(ColorMaterial::from(color))),
-            Transform::from_xyz(queen_center.x, queen_center.y, 3.0),
-            Visibility::Hidden,
-            Queen,
-            QueenHunger::default(),
-            ColonyMember { colony_id: *colony_id },
-            MapId(map_entity),
-            Health { current: 100.0, max: 100.0 },
-        ));
-    }
-}
+// Queens are now spawned from LDtk QueenSpawn markers (see ldtk_maps.rs).
 
 // ── View cycling ─────────────────────────────────────────────────────
 

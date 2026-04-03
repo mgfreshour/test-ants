@@ -125,7 +125,7 @@ pub fn brood_stimulus_strength(distance_cells: f32) -> f32 {
 /// Stronger when closer and when construction pheromone is high.
 pub fn dig_stimulus_strength(distance_cells: f32, construction_pheromone: f32) -> f32 {
     let proximity = 1.0 / (1.0 + distance_cells * 0.4);
-    let pheromone_boost = 0.3 + construction_pheromone * 0.7;
+    let pheromone_boost = 0.5 + construction_pheromone * 0.5;
     (proximity * pheromone_boost).clamp(0.0, 1.0)
 }
 
@@ -226,6 +226,25 @@ mod tests {
         let close = dig_stimulus_strength(1.0, 0.5);
         let far = dig_stimulus_strength(5.0, 0.5);
         assert!(close > far);
+    }
+
+    #[test]
+    fn dig_bootstraps_without_construction_pheromone() {
+        // Regression: diggers must respond to adjacent dig faces even with zero
+        // construction pheromone, otherwise the dig feedback loop never starts.
+        let digger = default_thresholds(AntJob::Digger);
+        let strength = dig_stimulus_strength(1.0, 0.0);
+        assert!(
+            should_respond(strength, digger.dig, 0),
+            "dig stimulus {strength} must exceed digger threshold {} at dist=1 with no pheromone",
+            digger.dig,
+        );
+        // Must also work with 1 crowding worker (threshold + 0.15)
+        assert!(
+            should_respond(strength, digger.dig, 1),
+            "dig stimulus {strength} must exceed crowded threshold {} at dist=1",
+            digger.dig + 0.15,
+        );
     }
 
     #[test]
