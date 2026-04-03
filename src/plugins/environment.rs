@@ -11,13 +11,13 @@ use crate::plugins::player::ToastQueue;
 /// Environment hazards and dynamic events: rain, flooding, footsteps, lawnmower, pesticide, day/night.
 pub struct EnvironmentPlugin;
 
-/// Manual hazard trigger type.
-#[derive(Debug, Clone, Copy)]
-pub enum HazardTrigger {
-    Rain,
-    Footstep,
-    Lawnmower,
-    Pesticide,
+/// Message to trigger a hazard event manually.
+#[derive(Message)]
+pub enum HazardEvent {
+    TriggerRain,
+    TriggerFootstep,
+    TriggerLawnmower,
+    TriggerPesticide,
 }
 
 impl Plugin for EnvironmentPlugin {
@@ -41,7 +41,7 @@ impl Plugin for EnvironmentPlugin {
 }
 
 /// Global environment state tracking weather, time, and active hazards.
-#[derive(Resource, Debug)]
+#[derive(Resource, Clone, Debug)]
 pub struct EnvironmentState {
     /// 0.0 = midnight, 0.5 = noon, cycles every 3 minutes (180 seconds)
     pub time_of_day: f32,
@@ -59,8 +59,6 @@ pub struct EnvironmentState {
     pub active_mowers: Vec<ActiveMower>,
     /// Active footstep paths (human walking across the yard).
     pub active_footstep_paths: Vec<ActiveFootstepPath>,
-    /// Fractional raindrop accumulator (carries sub-frame remainders).
-    pub rain_spawn_accum: f32,
 }
 
 /// A lawnmower that sweeps horizontally across the yard.
@@ -124,8 +122,6 @@ pub struct HazardZone {
     pub damage_per_tick: f32,
     pub remaining_time: f32,
     pub max_time: f32,
-    /// If set, damage uses a rectangular AABB (half-width, half-height) instead of radius.
-    pub half_size: Option<Vec2>,
 }
 
 /// Marker for a sprite entity that visualises a HazardZone on the main map.
@@ -167,7 +163,6 @@ impl Default for EnvironmentState {
             active_hazards: Vec::new(),
             active_mowers: Vec::new(),
             active_footstep_paths: Vec::new(),
-            rain_spawn_accum: 0.0,
         }
     }
 }
@@ -236,27 +231,27 @@ fn update_rain_state(
 /// Handle manually triggered hazard events from UI.
 fn handle_manual_hazards(
     mut env: ResMut<EnvironmentState>,
+    mut events: MessageReader<HazardEvent>,
     mut toasts: ResMut<ToastQueue>,
 ) {
-    let triggers: Vec<HazardTrigger> = env.manual_triggers.drain(..).collect();
-    for trigger in triggers {
-        match trigger {
-            HazardTrigger::Rain => {
+    for event in events.read() {
+        match event {
+            HazardEvent::TriggerRain => {
                 env.is_raining = true;
                 env.evaporation_multiplier = 10.0;
                 env.flood_level = 0.0;
                 env.rain_timer = 60.0;
                 toasts.push("Rain triggered!".to_string());
             }
-            HazardTrigger::Footstep => {
+            HazardEvent::TriggerFootstep => {
                 spawn_footstep_path(&mut env, &mut rand::thread_rng());
                 toasts.push("Human spotted!".to_string());
             }
-            HazardTrigger::Lawnmower => {
+            HazardEvent::TriggerLawnmower => {
                 spawn_mower(&mut env, &mut rand::thread_rng());
                 toasts.push("Lawnmower!".to_string());
             }
-            HazardTrigger::Pesticide => {
+            HazardEvent::TriggerPesticide => {
                 let pos = Vec2::new(
                     rand::thread_rng().gen_range(100.0..1180.0),
                     rand::thread_rng().gen_range(100.0..620.0),
@@ -269,7 +264,6 @@ fn handle_manual_hazards(
                     damage_per_tick: 5.0,
                     remaining_time: 30.0,
                     max_time: 30.0,
-                    half_size: None,
                 }));
                 toasts.push("Pesticide spray!".to_string());
             }
@@ -299,16 +293,9 @@ fn update_hazard_events(
 
     // Apply damage from active hazards
     for (transform, mut health) in query.iter_mut() {
-        let pos = transform.translation.truncate();
         for (_id, hazard) in &env.active_hazards {
-            let hit = if let Some(hs) = hazard.half_size {
-                // Rectangular AABB check
-                let d = (pos - hazard.position).abs();
-                d.x < hs.x && d.y < hs.y
-            } else {
-                pos.distance(hazard.position) < hazard.radius
-            };
-            if hit {
+            let dist = transform.translation.truncate().distance(hazard.position);
+            if dist < hazard.radius {
                 health.current -= hazard.damage_per_tick * delta;
             }
         }
@@ -341,7 +328,6 @@ fn update_hazard_events(
                     damage_per_tick: 5.0, // Damage over time
                     remaining_time: 30.0,
                     max_time: 30.0,
-                    half_size: None,
                 }));
                 toasts.push("Pesticide spray detected!".to_string());
             }
@@ -374,7 +360,6 @@ fn spawn_mower(env: &mut EnvironmentState, rng: &mut impl Rng) {
         damage_per_tick: 999.0,
         remaining_time: 999.0, // managed by ActiveMower, not the timer
         max_time: 999.0,
-        half_size: None,
     }));
 
     env.active_mowers.push(ActiveMower {
@@ -409,12 +394,12 @@ fn spawn_footstep_path(env: &mut EnvironmentState, rng: &mut impl Rng) {
         direction,
         perpendicular,
         next_pos: start,
-        stride_length: rng.gen_range(80.0..120.0),
-        lateral_offset: rng.gen_range(15.0..22.0),
+        stride_length: rng.gen_range(40.0..60.0),
+        lateral_offset: rng.gen_range(8.0..14.0),
         is_left: true,
         step_timer: 0.0, // first step immediately
-        step_interval: rng.gen_range(0.6..0.9),
-        steps_remaining: rng.gen_range(35..50),
+        step_interval: rng.gen_range(0.3..0.5),
+        steps_remaining: rng.gen_range(12..25),
         current_hazard_id: None,
     });
 }
@@ -498,11 +483,10 @@ fn update_animated_hazards(
         new_hazards.push((new_id, HazardZone {
             kind: HazardKind::Footstep,
             position: foot_pos,
-            radius: 60.0,
+            radius: 30.0,
             damage_per_tick: 999.0,
             remaining_time: path.step_interval + 0.1, // slightly longer than interval so it overlaps
             max_time: path.step_interval + 0.1,
-            half_size: Some(Vec2::new(25.0, 55.0)), // foot-shaped rectangle (~50 wide x 110 tall)
         }));
 
         path.current_hazard_id = Some(new_id);
@@ -585,13 +569,10 @@ fn sync_hazard_visuals(
         }
 
         let (color, size) = match hazard.kind {
-            HazardKind::Footstep => {
-                let hs = hazard.half_size.unwrap_or(Vec2::new(25.0, 55.0));
-                (
-                    Color::srgba(0.2, 0.15, 0.1, 0.55),
-                    hs * 2.0, // full width x full height
-                )
-            }
+            HazardKind::Footstep => (
+                Color::srgba(0.2, 0.15, 0.1, 0.55),
+                Vec2::new(hazard.radius * 2.0, hazard.radius * 2.5),
+            ),
             HazardKind::Lawnmower => (
                 Color::srgba(0.9, 0.2, 0.1, 0.35),
                 Vec2::new(hazard.radius * 4.0, hazard.radius * 2.0),
@@ -652,7 +633,7 @@ const RAIN_SPAWN_RATE: f32 = 60.0; // drops per second
 /// Spawn, animate, and despawn raindrop sprite entities when raining.
 fn update_rain_visuals(
     mut commands: Commands,
-    mut env: ResMut<EnvironmentState>,
+    env: Res<EnvironmentState>,
     time: Res<Time>,
     sim_clock: Res<SimClock>,
     registry: Res<MapRegistry>,
@@ -661,12 +642,11 @@ fn update_rain_visuals(
 ) {
     let delta = time.delta_secs();
 
-    // If not raining, despawn all existing drops and reset accumulator
+    // If not raining, despawn all existing drops
     if !env.is_raining {
         for (entity, _, _, _) in drops.iter() {
             commands.entity(entity).despawn();
         }
-        env.rain_spawn_accum = 0.0;
         return;
     }
 
@@ -690,14 +670,9 @@ fn update_rain_visuals(
     let cam_x = cam_pos.translation.x;
     let cam_y = cam_pos.translation.y;
 
-    // Accumulate fractional drops across frames
-    env.rain_spawn_accum += RAIN_SPAWN_RATE * delta;
+    // Spawn new drops up to the cap
     let current_count = drops.iter().count();
-    let whole_drops = env.rain_spawn_accum as usize;
-    let to_spawn = whole_drops.min(MAX_RAINDROPS.saturating_sub(current_count));
-    env.rain_spawn_accum -= to_spawn as f32;
-    // Clamp accumulator to avoid runaway after long pauses/unfocus
-    env.rain_spawn_accum = env.rain_spawn_accum.min(RAIN_SPAWN_RATE);
+    let to_spawn = ((RAIN_SPAWN_RATE * delta) as usize).min(MAX_RAINDROPS.saturating_sub(current_count));
 
     for _ in 0..to_spawn {
         let x = rng.gen_range((cam_x - half_w)..(cam_x + half_w));

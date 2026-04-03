@@ -19,6 +19,7 @@ use plugins::nest_navigation::NestNavigationPlugin;
 use plugins::combat::CombatPlugin;
 use plugins::egui_ui::EguiUiPlugin;
 use plugins::pheromone::PheromonePlugin;
+use plugins::ant_sprites::AntSpritePlugin;
 use plugins::player::PlayerPlugin;
 use ui::hud::HudPlugin;
 
@@ -46,6 +47,7 @@ fn main() {
             PheromonePlugin,
             PlayerPlugin,
             CombatPlugin,
+            AntSpritePlugin,
             EguiUiPlugin,
             HudPlugin,
         ))

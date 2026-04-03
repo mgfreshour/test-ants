@@ -10,4 +10,5 @@ pub mod nest_ai;
 pub mod nest_navigation;
 pub mod nest_pheromone;
 pub mod pheromone;
+pub mod ant_sprites;
 pub mod player;
