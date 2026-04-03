@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """Generate a pixel-art food spritesheet inspired by Castlevania wall meat.
 
-Layout (32×32 per frame, 8 columns):
+Layout (48×48 per frame, 8 columns):
   Row 0: Food variants (turkey leg, ham, roast, steak, drumstick, fruit, cheese, bread)
 
 Each food item sits on a small plate/surface and has that classic NES/SNES
 pixel-art look — bold outlines, warm cooked-meat tones, highlights.
+Big food types (turkey leg, ham, roast, steak) are drawn larger within their frames.
 """
 
 from PIL import Image, ImageDraw
 import math
 
-FRAME = 32
+FRAME = 48
 COLS = 8
 ROWS = 1
 WIDTH = FRAME * COLS
@@ -95,217 +96,217 @@ def draw_sparkle(draw, x, y):
 def draw_turkey_leg(frame):
     """Classic Castlevania wall meat — a big roasted turkey leg."""
     draw = ImageDraw.Draw(frame)
-    cx, cy = 16, 16
+    cx, cy = 24, 22
 
-    draw_plate(draw, cx, cy + 5)
+    draw_plate(draw, cx, cy + 8)
 
     # Bone handle (lower-left, angled)
-    bone_pts = [(cx + 6, cy + 4), (cx + 10, cy + 8)]
-    draw.line(bone_pts, fill=BONE_MID, width=3)
-    draw.line(bone_pts, fill=BONE_LIGHT, width=1)
+    bone_pts = [(cx + 9, cy + 5), (cx + 15, cy + 12)]
+    draw.line(bone_pts, fill=BONE_MID, width=4)
+    draw.line(bone_pts, fill=BONE_LIGHT, width=2)
     # Bone knob
-    filled_ellipse(draw, cx + 11, cy + 9, 2, 2, BONE_MID)
-    filled_ellipse(draw, cx + 11, cy + 9, 1, 1, BONE_LIGHT)
+    filled_ellipse(draw, cx + 16, cy + 13, 3, 3, BONE_MID)
+    filled_ellipse(draw, cx + 16, cy + 13, 2, 2, BONE_LIGHT)
 
     # Main meat body (big drumstick shape)
-    outline_ellipse(draw, cx - 1, cy, 9, 7, OUTLINE, SKIN_DARK)
-    filled_ellipse(draw, cx - 1, cy, 8, 6, SKIN_MID)
-    filled_ellipse(draw, cx - 2, cy - 1, 6, 4, MEAT_MID)
-    filled_ellipse(draw, cx - 3, cy - 2, 4, 3, MEAT_LIGHT)
+    outline_ellipse(draw, cx - 2, cy, 13, 10, OUTLINE, SKIN_DARK)
+    filled_ellipse(draw, cx - 2, cy, 12, 9, SKIN_MID)
+    filled_ellipse(draw, cx - 3, cy - 1, 9, 6, MEAT_MID)
+    filled_ellipse(draw, cx - 4, cy - 2, 6, 4, MEAT_LIGHT)
 
     # Crispy highlight
-    filled_ellipse(draw, cx - 4, cy - 3, 2, 1, MEAT_HIGHLIGHT)
+    filled_ellipse(draw, cx - 6, cy - 4, 3, 2, MEAT_HIGHLIGHT)
 
     # Bite mark (dark crescent on right side)
-    filled_ellipse(draw, cx + 4, cy + 1, 3, 3, MEAT_DARK)
-    filled_ellipse(draw, cx + 5, cy + 1, 2, 2, MEAT_MID)
+    filled_ellipse(draw, cx + 6, cy + 1, 4, 4, MEAT_DARK)
+    filled_ellipse(draw, cx + 7, cy + 1, 3, 3, MEAT_MID)
 
-    draw_sparkle(draw, cx - 6, cy - 5)
+    draw_sparkle(draw, cx - 8, cy - 7)
 
 
 def draw_ham(frame):
     """A big ham / pork roast on a plate."""
     draw = ImageDraw.Draw(frame)
-    cx, cy = 16, 16
+    cx, cy = 24, 22
 
-    draw_plate(draw, cx, cy + 5)
+    draw_plate(draw, cx, cy + 8)
 
     # Ham body — wider than tall
-    outline_ellipse(draw, cx, cy - 1, 10, 6, OUTLINE, SKIN_DARK)
-    filled_ellipse(draw, cx, cy - 1, 9, 5, SKIN_MID)
-    filled_ellipse(draw, cx - 1, cy - 2, 7, 4, MEAT_MID)
-    filled_ellipse(draw, cx - 1, cy - 3, 5, 2, MEAT_LIGHT)
-    filled_ellipse(draw, cx - 2, cy - 4, 3, 1, MEAT_HIGHLIGHT)
+    outline_ellipse(draw, cx, cy - 1, 15, 9, OUTLINE, SKIN_DARK)
+    filled_ellipse(draw, cx, cy - 1, 14, 8, SKIN_MID)
+    filled_ellipse(draw, cx - 1, cy - 2, 11, 6, MEAT_MID)
+    filled_ellipse(draw, cx - 1, cy - 3, 8, 3, MEAT_LIGHT)
+    filled_ellipse(draw, cx - 2, cy - 4, 5, 2, MEAT_HIGHLIGHT)
 
     # Cross-hatch score marks on the skin
     for i in range(-2, 3):
-        x = cx + i * 3
-        draw.line([(x, cy + 1), (x + 2, cy + 3)], fill=SKIN_DARK, width=1)
+        x = cx + i * 4
+        draw.line([(x, cy + 1), (x + 3, cy + 4)], fill=SKIN_DARK, width=1)
 
     # Bone end sticking out left
-    draw.line([(cx - 10, cy - 1), (cx - 13, cy - 1)], fill=BONE_MID, width=2)
-    filled_ellipse(draw, cx - 13, cy - 1, 1, 1, BONE_LIGHT)
+    draw.line([(cx - 15, cy - 1), (cx - 20, cy - 1)], fill=BONE_MID, width=3)
+    filled_ellipse(draw, cx - 20, cy - 1, 2, 2, BONE_LIGHT)
 
-    draw_sparkle(draw, cx + 5, cy - 6)
+    draw_sparkle(draw, cx + 8, cy - 8)
 
 
 def draw_whole_roast(frame):
     """A whole roast chicken / turkey on a plate — the iconic wall meat."""
     draw = ImageDraw.Draw(frame)
-    cx, cy = 16, 15
+    cx, cy = 24, 20
 
-    draw_plate(draw, cx, cy + 6)
+    draw_plate(draw, cx, cy + 10)
 
     # Body — big oval
-    outline_ellipse(draw, cx, cy, 10, 7, OUTLINE, SKIN_DARK)
-    filled_ellipse(draw, cx, cy, 9, 6, SKIN_MID)
-    filled_ellipse(draw, cx, cy - 1, 7, 4, SKIN_LIGHT)
-    filled_ellipse(draw, cx, cy - 2, 5, 3, MEAT_LIGHT)
-    filled_ellipse(draw, cx - 1, cy - 3, 3, 1, MEAT_HIGHLIGHT)
+    outline_ellipse(draw, cx, cy, 15, 10, OUTLINE, SKIN_DARK)
+    filled_ellipse(draw, cx, cy, 14, 9, SKIN_MID)
+    filled_ellipse(draw, cx, cy - 1, 11, 6, SKIN_LIGHT)
+    filled_ellipse(draw, cx, cy - 2, 8, 4, MEAT_LIGHT)
+    filled_ellipse(draw, cx - 1, cy - 3, 5, 2, MEAT_HIGHLIGHT)
 
     # Two drumsticks poking out the sides
     # Left drumstick
-    draw.line([(cx - 7, cy + 3), (cx - 11, cy + 6)], fill=SKIN_DARK, width=2)
-    filled_ellipse(draw, cx - 11, cy + 6, 1, 1, BONE_LIGHT)
+    draw.line([(cx - 10, cy + 4), (cx - 16, cy + 9)], fill=SKIN_DARK, width=3)
+    filled_ellipse(draw, cx - 16, cy + 9, 2, 2, BONE_LIGHT)
     # Right drumstick
-    draw.line([(cx + 7, cy + 3), (cx + 11, cy + 6)], fill=SKIN_DARK, width=2)
-    filled_ellipse(draw, cx + 11, cy + 6, 1, 1, BONE_LIGHT)
+    draw.line([(cx + 10, cy + 4), (cx + 16, cy + 9)], fill=SKIN_DARK, width=3)
+    filled_ellipse(draw, cx + 16, cy + 9, 2, 2, BONE_LIGHT)
 
-    draw_sparkle(draw, cx - 3, cy - 7)
-    draw_sparkle(draw, cx + 6, cy - 4)
+    draw_sparkle(draw, cx - 5, cy - 10)
+    draw_sparkle(draw, cx + 9, cy - 6)
 
 
 def draw_steak(frame):
     """A thick T-bone steak."""
     draw = ImageDraw.Draw(frame)
-    cx, cy = 16, 16
+    cx, cy = 24, 22
 
-    draw_plate(draw, cx, cy + 5)
+    draw_plate(draw, cx, cy + 8)
 
     # Steak body — slightly irregular
-    outline_ellipse(draw, cx, cy - 1, 9, 6, OUTLINE, MEAT_DARK)
-    filled_ellipse(draw, cx, cy - 1, 8, 5, MEAT_MID)
-    filled_ellipse(draw, cx - 1, cy - 2, 6, 3, MEAT_LIGHT)
-    filled_ellipse(draw, cx - 2, cy - 3, 3, 1, MEAT_HIGHLIGHT)
+    outline_ellipse(draw, cx, cy - 1, 14, 9, OUTLINE, MEAT_DARK)
+    filled_ellipse(draw, cx, cy - 1, 13, 8, MEAT_MID)
+    filled_ellipse(draw, cx - 1, cy - 2, 10, 5, MEAT_LIGHT)
+    filled_ellipse(draw, cx - 2, cy - 3, 5, 2, MEAT_HIGHLIGHT)
 
     # Grill marks
     for i in range(-2, 3):
-        x = cx + i * 3
-        draw.line([(x - 1, cy + 2), (x + 2, cy - 1)], fill=SKIN_DARK, width=1)
+        x = cx + i * 4
+        draw.line([(x - 1, cy + 2), (x + 3, cy - 1)], fill=SKIN_DARK, width=1)
 
     # T-bone
-    draw.line([(cx, cy - 5), (cx, cy + 3)], fill=BONE_MID, width=1)
-    draw.line([(cx - 3, cy - 2), (cx + 3, cy - 2)], fill=BONE_MID, width=1)
+    draw.line([(cx, cy - 7), (cx, cy + 4)], fill=BONE_MID, width=2)
+    draw.line([(cx - 5, cy - 2), (cx + 5, cy - 2)], fill=BONE_MID, width=2)
 
     # Fat edge on top
-    filled_ellipse(draw, cx, cy - 5, 5, 1, MEAT_HIGHLIGHT)
+    filled_ellipse(draw, cx, cy - 7, 8, 2, MEAT_HIGHLIGHT)
 
-    draw_sparkle(draw, cx + 6, cy - 5)
+    draw_sparkle(draw, cx + 9, cy - 7)
 
 
 def draw_drumstick(frame):
     """A single small drumstick — simpler, for small food drops."""
     draw = ImageDraw.Draw(frame)
-    cx, cy = 16, 16
+    cx, cy = 20, 20
 
-    draw_plate(draw, cx, cy + 4)
+    draw_plate(draw, cx, cy + 6)
 
     # Bone
-    draw.line([(cx + 3, cy + 2), (cx + 8, cy + 5)], fill=BONE_MID, width=2)
-    filled_ellipse(draw, cx + 9, cy + 5, 2, 2, BONE_MID)
-    filled_ellipse(draw, cx + 9, cy + 5, 1, 1, BONE_LIGHT)
+    draw.line([(cx + 4, cy + 3), (cx + 12, cy + 8)], fill=BONE_MID, width=3)
+    filled_ellipse(draw, cx + 13, cy + 8, 3, 3, BONE_MID)
+    filled_ellipse(draw, cx + 13, cy + 8, 2, 2, BONE_LIGHT)
 
     # Meat
-    outline_ellipse(draw, cx - 1, cy - 1, 7, 5, OUTLINE, SKIN_DARK)
-    filled_ellipse(draw, cx - 1, cy - 1, 6, 4, SKIN_MID)
-    filled_ellipse(draw, cx - 2, cy - 2, 4, 3, MEAT_MID)
-    filled_ellipse(draw, cx - 3, cy - 3, 2, 1, MEAT_LIGHT)
+    outline_ellipse(draw, cx - 1, cy - 1, 10, 7, OUTLINE, SKIN_DARK)
+    filled_ellipse(draw, cx - 1, cy - 1, 9, 6, SKIN_MID)
+    filled_ellipse(draw, cx - 2, cy - 2, 6, 4, MEAT_MID)
+    filled_ellipse(draw, cx - 3, cy - 3, 3, 2, MEAT_LIGHT)
 
-    draw_sparkle(draw, cx - 5, cy - 5)
+    draw_sparkle(draw, cx - 7, cy - 7)
 
 
 def draw_apple(frame):
     """A shiny red apple — classic Castlevania health pickup."""
     draw = ImageDraw.Draw(frame)
-    cx, cy = 16, 17
+    cx, cy = 24, 23
 
     # Apple body
-    outline_ellipse(draw, cx, cy, 7, 7, OUTLINE, APPLE_DARK)
-    filled_ellipse(draw, cx, cy, 6, 6, APPLE_RED)
-    filled_ellipse(draw, cx - 1, cy - 1, 4, 4, APPLE_HIGHLIGHT)
-    filled_ellipse(draw, cx - 2, cy - 2, 2, 2, (240, 120, 90, 255))
+    outline_ellipse(draw, cx, cy, 10, 10, OUTLINE, APPLE_DARK)
+    filled_ellipse(draw, cx, cy, 9, 9, APPLE_RED)
+    filled_ellipse(draw, cx - 1, cy - 1, 6, 6, APPLE_HIGHLIGHT)
+    filled_ellipse(draw, cx - 2, cy - 2, 3, 3, (240, 120, 90, 255))
 
     # Stem
-    draw.line([(cx, cy - 7), (cx + 1, cy - 10)], fill=SKIN_DARK, width=1)
+    draw.line([(cx, cy - 10), (cx + 1, cy - 14)], fill=SKIN_DARK, width=2)
 
     # Leaf
-    filled_ellipse(draw, cx + 2, cy - 9, 2, 1, LEAF_GREEN)
-    draw.point((cx + 3, cy - 10), fill=LEAF_DARK)
+    filled_ellipse(draw, cx + 3, cy - 12, 3, 2, LEAF_GREEN)
+    draw.point((cx + 5, cy - 13), fill=LEAF_DARK)
 
     # Highlight dot
+    draw.point((cx - 4, cy - 5), fill=SPARKLE)
     draw.point((cx - 3, cy - 4), fill=SPARKLE)
-    draw.point((cx - 2, cy - 3), fill=SPARKLE)
 
-    draw_sparkle(draw, cx + 5, cy - 6)
+    draw_sparkle(draw, cx + 7, cy - 8)
 
 
 def draw_cheese(frame):
     """A wedge of cheese with holes."""
     draw = ImageDraw.Draw(frame)
-    cx, cy = 16, 16
+    cx, cy = 22, 22
 
-    draw_plate(draw, cx, cy + 5)
+    draw_plate(draw, cx, cy + 8)
 
     # Cheese wedge — triangle-ish shape
     pts = [
-        (cx - 8, cy + 3),   # bottom-left
-        (cx + 8, cy + 3),   # bottom-right
-        (cx + 4, cy - 7),   # top-right (wedge point)
+        (cx - 12, cy + 4),   # bottom-left
+        (cx + 12, cy + 4),   # bottom-right
+        (cx + 6, cy - 10),   # top-right (wedge point)
     ]
     draw.polygon(pts, fill=CHEESE_MID, outline=OUTLINE)
 
     # Inner face (cut side)
     inner_pts = [
-        (cx - 7, cy + 2),
-        (cx + 7, cy + 2),
-        (cx + 3, cy - 6),
+        (cx - 11, cy + 3),
+        (cx + 11, cy + 3),
+        (cx + 5, cy - 9),
     ]
     draw.polygon(inner_pts, fill=CHEESE_LIGHT)
 
     # Cheese holes
-    filled_ellipse(draw, cx - 2, cy, 2, 2, CHEESE_HOLE)
-    filled_ellipse(draw, cx + 3, cy - 1, 1, 1, CHEESE_HOLE)
-    filled_ellipse(draw, cx, cy - 3, 1, 1, CHEESE_HOLE)
+    filled_ellipse(draw, cx - 3, cy, 3, 3, CHEESE_HOLE)
+    filled_ellipse(draw, cx + 4, cy - 1, 2, 2, CHEESE_HOLE)
+    filled_ellipse(draw, cx, cy - 4, 2, 2, CHEESE_HOLE)
 
     # Top edge highlight
-    draw.line([(cx - 6, cy + 2), (cx + 2, cy - 6)], fill=CHEESE_LIGHT, width=1)
+    draw.line([(cx - 9, cy + 2), (cx + 3, cy - 9)], fill=CHEESE_LIGHT, width=2)
 
-    draw_sparkle(draw, cx - 4, cy - 6)
+    draw_sparkle(draw, cx - 6, cy - 8)
 
 
 def draw_bread(frame):
     """A loaf of bread, torn open."""
     draw = ImageDraw.Draw(frame)
-    cx, cy = 16, 16
+    cx, cy = 22, 22
 
-    draw_plate(draw, cx, cy + 5)
+    draw_plate(draw, cx, cy + 8)
 
     # Bread body — oval loaf
-    outline_ellipse(draw, cx, cy - 1, 10, 5, OUTLINE, BREAD_DARK)
-    filled_ellipse(draw, cx, cy - 1, 9, 4, BREAD_MID)
-    filled_ellipse(draw, cx, cy - 2, 7, 3, BREAD_LIGHT)
+    outline_ellipse(draw, cx, cy - 1, 15, 7, OUTLINE, BREAD_DARK)
+    filled_ellipse(draw, cx, cy - 1, 14, 6, BREAD_MID)
+    filled_ellipse(draw, cx, cy - 2, 11, 4, BREAD_LIGHT)
 
     # Score line on top (bakery cut)
-    draw.line([(cx - 5, cy - 3), (cx + 5, cy - 3)], fill=BREAD_DARK, width=1)
+    draw.line([(cx - 8, cy - 4), (cx + 8, cy - 4)], fill=BREAD_DARK, width=2)
 
     # Torn/exposed bread interior on right
-    filled_ellipse(draw, cx + 6, cy - 1, 3, 3, BREAD_INNER)
-    filled_ellipse(draw, cx + 6, cy - 1, 2, 2, (240, 225, 180, 255))
+    filled_ellipse(draw, cx + 9, cy - 1, 4, 4, BREAD_INNER)
+    filled_ellipse(draw, cx + 9, cy - 1, 3, 3, (240, 225, 180, 255))
 
     # Crust highlight on top
-    filled_ellipse(draw, cx - 2, cy - 4, 4, 1, BREAD_LIGHT)
+    filled_ellipse(draw, cx - 3, cy - 5, 6, 2, BREAD_LIGHT)
 
-    draw_sparkle(draw, cx - 6, cy - 5)
+    draw_sparkle(draw, cx - 8, cy - 7)
 
 
 # Ordered list of food drawing functions

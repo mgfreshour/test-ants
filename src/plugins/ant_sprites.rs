@@ -137,7 +137,7 @@ impl Default for SpiderAnimation {
 
 // ── Food spritesheet ──────────────────────────────────────────────
 
-const FOOD_FRAME_SIZE: u32 = 32;
+const FOOD_FRAME_SIZE: u32 = 48;
 const FOOD_COLS: u32 = 8;
 const FOOD_ROWS: u32 = 1;
 
@@ -145,6 +145,10 @@ const FOOD_ROWS: u32 = 1;
 /// 0=turkey leg, 1=ham, 2=whole roast, 3=steak, 4=drumstick, 5=apple, 6=cheese, 7=bread
 const FOOD_LARGE: [usize; 4] = [0, 1, 2, 3]; // big food (amount > 50)
 const FOOD_SMALL: [usize; 4] = [4, 5, 6, 7]; // small food (amount <= 50)
+
+/// Display sizes for food sprites
+const FOOD_LARGE_SIZE: f32 = 24.0;  // Large meat items
+const FOOD_SMALL_SIZE: f32 = 18.0;  // Small snacks
 
 #[derive(Resource)]
 pub struct FoodSpritesheet {
@@ -567,7 +571,7 @@ fn retrofit_food_sprites(
         });
 
         // Scale display size based on food amount
-        let size = if food.max > 50.0 { 14.0 } else { 10.0 };
+        let size = if food.max > 50.0 { FOOD_LARGE_SIZE } else { FOOD_SMALL_SIZE };
         sprite.custom_size = Some(Vec2::splat(size));
 
         commands.entity(entity).insert(FoodVariant(variant));
@@ -580,7 +584,7 @@ fn scale_food_sprites(
 ) {
     for (food, mut sprite) in &mut query {
         let ratio = (food.remaining / food.max).clamp(0.1, 1.0);
-        let base = if food.max > 50.0 { 14.0 } else { 10.0 };
+        let base = if food.max > 50.0 { FOOD_LARGE_SIZE } else { FOOD_SMALL_SIZE };
         let size = base * (0.5 + 0.5 * ratio); // shrinks to 50% at minimum
         sprite.custom_size = Some(Vec2::splat(size));
     }
