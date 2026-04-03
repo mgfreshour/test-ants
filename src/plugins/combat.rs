@@ -10,6 +10,7 @@ use crate::components::pheromone::PheromoneType;
 use crate::resources::active_map::{MapRegistry, viewing_surface};
 use crate::resources::pheromone::ColonyPheromones;
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
+use crate::plugins::spider_ai::Spider;
 use crate::sim_core::ant_logic;
 
 pub struct CombatPlugin;
@@ -17,12 +18,6 @@ pub struct CombatPlugin;
 const RED_COLONY_ID: u32 = 1;
 const COMBAT_RANGE: f32 = 15.0;
 const ALARM_SENSE_RADIUS: i32 = 6;
-
-#[derive(Component)]
-pub struct Spider {
-    pub hp: f32,
-    pub attack_cooldown: f32,
-}
 
 /// Antlion pit trap — ants entering the pit slide to the center and take damage.
 #[derive(Component)]
@@ -83,7 +78,7 @@ impl Plugin for CombatPlugin {
 
         app.init_resource::<GameResult>()
             .init_resource::<RedColonyStrategy>()
-            .add_systems(Startup, (spawn_red_colony, spawn_spider, spawn_antlion))
+            .add_systems(Startup, (spawn_red_colony, spawn_antlion))
             .add_systems(
                 Update,
                 (
@@ -92,7 +87,6 @@ impl Plugin for CombatPlugin {
                     combat_resolution,
                     alarm_pheromone_deposit,
                     alarm_response_steering,
-                    spider_ai,
                     antlion_ai,
                     death_system,
                     corpse_decay,
@@ -149,28 +143,6 @@ fn spawn_red_colony(mut commands: Commands, config: Res<SimConfig>, registry: Re
             MapId(registry.surface),
         ));
     }
-}
-
-fn spawn_spider(mut commands: Commands, config: Res<SimConfig>) {
-    let mut rng = rand::thread_rng();
-    let cx = config.world_width / 2.0;
-    let cy = config.world_height / 2.0;
-
-    let x = cx + rng.gen_range(-300.0..300.0);
-    let y = cy + rng.gen_range(-300.0..300.0);
-
-    commands.spawn((
-        Sprite {
-            color: Color::srgb(0.3, 0.2, 0.15),
-            custom_size: Some(Vec2::splat(14.0)),
-            ..default()
-        },
-        Transform::from_xyz(x, y, 2.5),
-        Spider {
-            hp: 50.0,
-            attack_cooldown: 0.0,
-        },
-    ));
 }
 
 fn ant_combat_detection(
@@ -326,38 +298,6 @@ fn alarm_response_steering(
                     *sense = TrailSense::FollowingAlarm;
                     movement.direction = alarm_grad.normalize();
                 }
-            }
-        }
-    }
-}
-
-fn spider_ai(
-    clock: Res<SimClock>,
-    time: Res<Time>,
-    mut spider_query: Query<(&Transform, &mut Spider)>,
-    mut ant_query: Query<(&Transform, &mut Health), With<Ant>>,
-) {
-    if clock.speed == SimSpeed::Paused {
-        return;
-    }
-
-    let dt = time.delta_secs() * clock.speed.multiplier();
-    let spider_range = 50.0;
-
-    for (spider_tf, mut spider) in &mut spider_query {
-        spider.attack_cooldown = (spider.attack_cooldown - dt).max(0.0);
-        if spider.attack_cooldown > 0.0 {
-            continue;
-        }
-
-        let spider_pos = spider_tf.translation.truncate();
-
-        for (ant_tf, mut health) in &mut ant_query {
-            let dist = spider_pos.distance(ant_tf.translation.truncate());
-            if dist < spider_range {
-                health.apply_damage(8.0, DamageSource::Spider);
-                spider.attack_cooldown = 0.5;
-                break;
             }
         }
     }
@@ -533,10 +473,30 @@ fn victory_defeat_check(
 
 // ── Antlion ────────────────────────────────────────────────────────
 
-fn spawn_antlion(mut commands: Commands, config: Res<SimConfig>) {
+fn spawn_antlion(mut commands: Commands, config: Res<SimConfig>, registry: Res<MapRegistry>) {
     let mut rng = rand::thread_rng();
-    let x = rng.gen_range(200.0..config.world_width - 200.0);
-    let y = rng.gen_range(200.0..config.world_height - 200.0);
+
+    let player_nest = config.nest_position;
+    let enemy_nest = Vec2::new(
+        config.world_width - config.nest_position.x,
+        config.world_height - config.nest_position.y,
+    );
+    let min_nest_dist = 150.0;
+
+    // Pick a position that isn't too close to either nest.
+    let (x, y) = loop {
+        let x = rng.gen_range(200.0..config.world_width - 200.0);
+        let y = rng.gen_range(200.0..config.world_height - 200.0);
+        let pos = Vec2::new(x, y);
+        if pos.distance(player_nest) > min_nest_dist && pos.distance(enemy_nest) > min_nest_dist {
+            break (x, y);
+        }
+    };
+
+    info!("Antlion spawned at ({:.0}, {:.0}), player_nest=({:.0},{:.0}), enemy_nest=({:.0},{:.0})",
+        x, y, player_nest.x, player_nest.y, enemy_nest.x, enemy_nest.y);
+
+    let map_id = MapId(registry.surface);
 
     // Pit visual — larger, slightly transparent circle.
     commands.spawn((
@@ -545,7 +505,9 @@ fn spawn_antlion(mut commands: Commands, config: Res<SimConfig>) {
             custom_size: Some(Vec2::splat(80.0)),
             ..default()
         },
-        Transform::from_xyz(x, y, 0.5),
+        Transform::from_xyz(x, y, 0.8),
+        crate::plugins::ant_sprites::AntlionPit,
+        map_id,
     ));
 
     // Antlion entity at the center.
@@ -562,6 +524,7 @@ fn spawn_antlion(mut commands: Commands, config: Res<SimConfig>) {
             damage_per_sec: 4.0,
             pull_strength: 50.0,
         },
+        map_id,
     ));
 }
 

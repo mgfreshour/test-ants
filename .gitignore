@@ -1,3 +1,7 @@
 /target
 # LDtk editor backups
 *.ldtk.bak
+.DS_Store
+# WASM build artifacts
+web/out/
+web/assets/

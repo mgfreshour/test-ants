@@ -61,7 +61,8 @@
 ### Player Controls, Camera, and Combat
 - `src/plugins/player.rs`: Player ant control, follower recruitment/dismissal, manual pheromone trail, ant swapping, camera follow.
 - `src/plugins/camera.rs`: Free camera pan/zoom/clamp behavior on surface.
-- `src/plugins/combat.rs`: Enemy colony + spider, combat state transitions, damage/death, victory/defeat checks.
+- `src/plugins/combat.rs`: Enemy colony, antlion, combat state transitions, damage/death, victory/defeat checks.
+- `src/plugins/spider_ai.rs`: Spider AI — state machine (Idle/Patrolling/Chasing), vision cone, ambush patrol, chase, attack.
 - `src/resources/colony.rs`: ColonyStats (by AntJob), BehaviorSliders, CasteRatios, AggressionSettings.
 
 ### UI and UX

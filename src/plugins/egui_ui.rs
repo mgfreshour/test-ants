@@ -8,7 +8,8 @@ use crate::components::map::{MapKind, MapMarker};
 use crate::components::nest::{NestTask, Queen, QueenHunger, QueenTask};
 use crate::components::terrain::FoodSource;
 use crate::plugins::ant_ai::ColonyFood;
-use crate::plugins::combat::{GameResult, Spider};
+use crate::plugins::combat::GameResult;
+use crate::plugins::spider_ai::Spider;
 use crate::plugins::pheromone::{OverlayDisplay, OverlayState};
 use crate::plugins::nest_pheromone::NestPheromoneOverlayState;
 use crate::plugins::player::{

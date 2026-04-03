@@ -23,6 +23,7 @@ use plugins::pheromone::PheromonePlugin;
 use plugins::ant_sprites::AntSpritePlugin;
 use plugins::player::PlayerPlugin;
 use plugins::queen_ai::QueenAiPlugin;
+use plugins::spider_ai::SpiderAiPlugin;
 use plugins::steering::SteeringPlugin;
 use ui::hud::HudPlugin;
 
@@ -32,6 +33,8 @@ fn main() {
             primary_window: Some(Window {
                 title: "Colony — An Ant Colony Simulation".into(),
                 resolution: WindowResolution::new(1280, 720),
+                canvas: Some("#bevy".to_string()),
+                fit_canvas_to_parent: true,
                 ..default()
             }),
             ..default()
@@ -55,6 +58,7 @@ fn main() {
             PlayerPlugin,
             SteeringPlugin,
             CombatPlugin,
+            SpiderAiPlugin,
             AntSpritePlugin,
             EguiUiPlugin,
             HudPlugin,

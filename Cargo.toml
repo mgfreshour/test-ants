@@ -10,6 +10,9 @@ bevy_ecs_tilemap = "0.18"
 bevy_egui = "0.39"
 rand = "0.8"
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+
 # Enable dynamic linking for fast dev compiles (do NOT use for release builds)
 [features]
 dev = ["bevy/dynamic_linking"]
@@ -20,3 +23,8 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+[profile.wasm-release]
+inherits = "release"
+opt-level = "s"
+lto = "thin"
