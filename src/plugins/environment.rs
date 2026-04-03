@@ -322,9 +322,10 @@ fn update_hazard_events(
         }
     }
 
-    // Random hazard events (roughly every 30-60 seconds)
+    // Random hazard events (roughly every 45-90 seconds)
     let mut rng = rand::thread_rng();
-    if rng.gen::<f32>() < 0.001 {
+    let is_night = env.time_of_day < 0.25 || env.time_of_day > 0.75;
+    if !is_night && rng.gen::<f32>() < 0.00004 {
         let event_type = rng.gen_range(0..3);
         match event_type {
             0 => {

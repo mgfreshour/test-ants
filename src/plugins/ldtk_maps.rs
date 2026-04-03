@@ -269,29 +269,16 @@ fn process_ldtk_entities(
                 });
             }
             "NestEntrance" => {
-                // Spawn visual mound marker on surface
+                // Spawn visual mound marker on surface (spritesheet applied by retrofit system)
                 if map_id.0 == registry.surface {
-                    let mound_color = Color::srgb(0.35, 0.25, 0.15);
-                    let hole_color = Color::srgb(0.08, 0.05, 0.02);
-
                     commands.entity(entity).insert((
                         Sprite {
-                            color: mound_color,
+                            color: Color::srgb(0.35, 0.25, 0.15),
                             custom_size: Some(Vec2::splat(28.0)),
                             ..default()
                         },
                         Transform::from_xyz(world_pos.x, world_pos.y, 1.0),
-                    ));
-
-                    // Inner dark hole as child
-                    commands.spawn((
-                        Sprite {
-                            color: hole_color,
-                            custom_size: Some(Vec2::splat(14.0)),
-                            ..default()
-                        },
-                        Transform::from_xyz(world_pos.x, world_pos.y, 1.1),
-                        map_id,
+                        crate::plugins::ant_sprites::NestMound,
                     ));
                 }
             }
