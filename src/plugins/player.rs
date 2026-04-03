@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use rand::Rng;
 
 use crate::components::ant::{
-    Ant, AntState, CarriedItem, ColonyMember, Movement, PlayerControlled,
+    Ant, AntState, CarriedItem, ColonyMember, Movement, PlayerControlled, PortalCooldown,
 };
 use crate::components::map::{MapId, MapKind, MapMarker, MapPortal, PORTAL_RANGE};
 use crate::components::nest::{NestPath, NestTask};
@@ -315,11 +315,15 @@ fn player_portal_transition(
         *vis = Visibility::Hidden;
 
         if entering_nest {
-            commands.entity(entity).insert(NestTask::Wander { scan_timer: 0.0, wander_time: 0.0 });
+            commands.entity(entity).insert((
+                NestTask::Wander { scan_timer: 0.0, wander_time: 0.0 },
+                PortalCooldown::new(),
+            ));
             ant.state = AntState::Following;
         } else {
             commands.entity(entity).remove::<NestTask>();
             commands.entity(entity).remove::<NestPath>();
+            commands.entity(entity).insert(PortalCooldown::new());
             ant.state = AntState::Following;
         }
     }

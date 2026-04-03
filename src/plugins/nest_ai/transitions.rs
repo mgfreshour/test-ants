@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::ant::{Ant, AntJob, AntState, ColonyMember, Health, PlayerControlled, PortalCooldown, StimulusThresholds, Underground};
+use crate::components::ant::{Ant, AntJob, AntState, ColonyMember, Health, Movement, PlayerControlled, PortalCooldown, PositionHistory, StimulusThresholds, Underground};
 use crate::components::map::{MapId, MapMarker, MapPortal, PORTAL_RANGE};
 use crate::components::nest::{Brood, CellType, ChamberKind, NestPath, NestTask, StackedItem};
 use crate::plugins::nest_navigation::nest_grid_to_world;
@@ -256,11 +256,12 @@ pub(super) fn portal_transition(
 pub(super) fn nest_to_surface_transition(
     clock: Res<SimClock>,
     time: Res<Time>,
+    config: Res<crate::resources::simulation::SimConfig>,
     registry: Res<MapRegistry>,
     portal_query: Query<&MapPortal>,
     mut commands: Commands,
     mut query: Query<
-        (Entity, &mut Transform, &mut Ant, &mut NestTask, &mut MapId, &mut Visibility, &AntJob),
+        (Entity, &mut Transform, &mut Ant, &mut NestTask, &mut MapId, &mut Visibility, &AntJob, &mut Movement, &mut PositionHistory),
     >,
 ) {
     if clock.speed == SimSpeed::Paused {
@@ -270,7 +271,7 @@ pub(super) fn nest_to_surface_transition(
     let dt = time.delta_secs() * clock.speed.multiplier();
     let mut rng = rand::thread_rng();
 
-    for (entity, mut transform, mut ant, mut task, mut map_id, mut vis, job) in &mut query {
+    for (entity, mut transform, mut ant, mut task, mut map_id, mut vis, job, mut movement, mut history) in &mut query {
         // Only process ants currently in a nest.
         if map_id.0 == registry.surface {
             continue;
@@ -305,6 +306,12 @@ pub(super) fn nest_to_surface_transition(
                 transform.translation.y = surface_pos.y + rng.gen_range(-15.0..15.0);
                 // Visibility will be corrected by sync_map_visibility.
                 *vis = Visibility::Inherited;
+
+                // Reset movement for surface: randomize direction and use surface speed.
+                let angle = rng.gen::<f32>() * std::f32::consts::TAU;
+                movement.direction = Vec2::new(angle.cos(), angle.sin());
+                movement.speed = config.ant_speed_worker;
+                history.clear();
 
                 commands
                     .entity(entity)

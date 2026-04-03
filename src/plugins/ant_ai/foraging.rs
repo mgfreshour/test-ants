@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use rand::Rng;
 use crate::components::ant::{Ant, AntJob, AntState, CarriedItem, ColonyMember, Movement, PlayerControlled, PositionHistory, SteeringTarget, SteeringWeights, TrailSense};
+use crate::components::map::MapId;
 use crate::components::terrain::FoodSource;
+use crate::resources::active_map::MapRegistry;
 use crate::resources::pheromone::ColonyPheromones;
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 use crate::components::pheromone::PheromoneType;
@@ -28,9 +30,10 @@ fn should_follow_trail(entity: Entity, elapsed: f32) -> bool {
 pub fn ant_forage_steering(
     clock: Res<SimClock>,
     config: Res<SimConfig>,
+    registry: Res<MapRegistry>,
     grids: Option<Res<ColonyPheromones>>,
     food_query: Query<&Transform, With<FoodSource>>,
-    mut query: Query<(Entity, &Transform, &mut Movement, &mut Ant, &AntJob, &ColonyMember, &PositionHistory, &mut TrailSense, &mut SteeringTarget, &mut SteeringWeights), (Without<CarriedItem>, Without<PlayerControlled>)>,
+    mut query: Query<(Entity, &Transform, &mut Movement, &mut Ant, &AntJob, &ColonyMember, &PositionHistory, &MapId, &mut TrailSense, &mut SteeringTarget, &mut SteeringWeights), (Without<CarriedItem>, Without<PlayerControlled>)>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -39,7 +42,11 @@ pub fn ant_forage_steering(
     let mut rng = rand::thread_rng();
     let noise = config.exploration_noise;
 
-    for (entity, transform, mut movement, mut ant, job, colony, history, mut sense, mut steering_target, mut steering_weights) in &mut query {
+    for (entity, transform, mut movement, mut ant, job, colony, history, map_id, mut sense, mut steering_target, mut steering_weights) in &mut query {
+        // Only surface ants use foraging AI
+        if map_id.0 != registry.surface {
+            continue;
+        }
         // Only Forager and Unassigned ants use foraging AI
         if !matches!(job, AntJob::Forager | AntJob::Unassigned) {
             continue;

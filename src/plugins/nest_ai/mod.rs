@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use rand::Rng;
 use std::collections::HashMap;
 
-use crate::components::ant::{Ant, AntJob, AntState, ColonyMember, Health, Movement, PositionHistory, StimulusThresholds, SteeringTarget, SteeringWeights};
+use crate::components::ant::{Ant, AntJob, AntState, ColonyMember, Health, Movement, PositionHistory, StimulusThresholds, SteeringTarget, SteeringWeights, TrailSense};
 use crate::components::map::{MapId, MapKind, MapMarker};
 use crate::components::nest::{CellType, ChamberKind, NestPath, NestTask};
 use crate::plugins::ant_ai::ColonyFood;
@@ -246,6 +246,7 @@ fn spawn_initial_nest_ants(
                 PositionHistory::default(),
                 SteeringTarget::default(),
                 SteeringWeights::default(),
+                TrailSense::default(),
             ));
         }
     }

@@ -20,8 +20,9 @@ const ATTACK_ENEMY_DETECT_RANGE: f32 = 80.0;
 /// When the pheromone fades below threshold, revert to Foraging.
 pub fn ant_follow_recruit_steering(
     clock: Res<SimClock>,
+    registry: Res<MapRegistry>,
     grids: Option<Res<ColonyPheromones>>,
-    mut query: Query<(&Transform, &mut Movement, &mut Ant, &ColonyMember, &mut TrailSense, &mut SteeringTarget, &mut SteeringWeights), Without<PlayerControlled>>,
+    mut query: Query<(&Transform, &mut Movement, &mut Ant, &ColonyMember, &MapId, &mut TrailSense, &mut SteeringTarget, &mut SteeringWeights), Without<PlayerControlled>>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -29,8 +30,12 @@ pub fn ant_follow_recruit_steering(
 
     let mut rng = rand::thread_rng();
 
-    for (transform, mut movement, mut ant, colony, mut sense, mut steering_target, mut steering_weights) in &mut query {
+    for (transform, mut movement, mut ant, colony, map_id, mut sense, mut steering_target, mut steering_weights) in &mut query {
         if ant.state != AntState::Following {
+            continue;
+        }
+        // Only surface ants use surface recruit steering
+        if map_id.0 != registry.surface {
             continue;
         }
 
@@ -84,8 +89,9 @@ pub fn ant_follow_recruit_steering(
 /// regular followers, but also aggressively target nearby enemies.
 pub fn ant_attack_recruit_steering(
     clock: Res<SimClock>,
+    registry: Res<MapRegistry>,
     grids: Option<Res<ColonyPheromones>>,
-    mut query: Query<(&Transform, &mut Movement, &mut Ant, &ColonyMember, &mut TrailSense, &mut SteeringTarget, &mut SteeringWeights), Without<PlayerControlled>>,
+    mut query: Query<(&Transform, &mut Movement, &mut Ant, &ColonyMember, &MapId, &mut TrailSense, &mut SteeringTarget, &mut SteeringWeights), Without<PlayerControlled>>,
     enemy_query: Query<(&Transform, &ColonyMember), With<Ant>>,
 ) {
     if clock.speed == SimSpeed::Paused {
@@ -94,8 +100,12 @@ pub fn ant_attack_recruit_steering(
 
     let mut rng = rand::thread_rng();
 
-    for (transform, mut movement, mut ant, colony, mut sense, mut steering_target, mut steering_weights) in &mut query {
+    for (transform, mut movement, mut ant, colony, map_id, mut sense, mut steering_target, mut steering_weights) in &mut query {
         if ant.state != AntState::Attacking {
+            continue;
+        }
+        // Only surface ants use surface attack recruit steering
+        if map_id.0 != registry.surface {
             continue;
         }
 

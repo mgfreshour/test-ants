@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::ant::{Ant, AntJob, AntState, Caste, ColonyMember, Health, Movement, PositionHistory, StimulusThresholds, SteeringTarget, SteeringWeights};
+use crate::components::ant::{Ant, AntJob, AntState, Caste, ColonyMember, Health, Movement, PositionHistory, StimulusThresholds, SteeringTarget, SteeringWeights, TrailSense};
 use crate::components::map::{MapId, MapKind, MapMarker, spawn_portal_pair};
 use crate::components::nest::{Brood, BroodStage, CellType, ChamberKind, NestTask, NestTile, Queen, QueenHunger};
 use crate::plugins::ant_ai::ColonyFood;
@@ -454,6 +454,7 @@ fn brood_development(
                         PositionHistory::default(),
                         SteeringTarget::default(),
                         SteeringWeights::default(),
+                        TrailSense::default(),
                     ));
                 }
             }
