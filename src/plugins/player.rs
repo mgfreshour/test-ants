@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use rand::Rng;
 
 use crate::components::ant::{
-    Ant, AntState, CarriedItem, ColonyMember, Movement, PlayerControlled, PortalCooldown,
+    Ant, AntState, CarriedItem, ClickMoveTarget, ColonyMember, Movement, PlayerControlled, PortalCooldown, SteeringTarget, SteeringWeights,
 };
 use crate::components::map::{MapId, MapKind, MapMarker, MapPortal, PORTAL_RANGE};
 use crate::components::nest::{NestPath, NestTask};
@@ -10,9 +10,10 @@ use crate::components::pheromone::PheromoneType;
 use crate::components::terrain::FoodSource;
 use crate::plugins::ant_ai::ColonyFood;
 use crate::plugins::camera::MainCamera;
-use crate::plugins::nest_navigation::world_to_nest_grid;
+use crate::plugins::nest_navigation::{nest_grid_to_world, world_to_nest_grid};
 use crate::resources::active_map::{ActiveMap, MapRegistry, SavedCamera, SavedCameraStates};
 use crate::resources::nest::NestGrid;
+use crate::resources::nest_pathfinding::NestPathCache;
 use crate::resources::nest_pheromone::{NestPheromoneConfig, NestPheromoneGrid};
 use crate::resources::pheromone::{ColonyPheromones, PheromoneConfig};
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
@@ -114,6 +115,13 @@ impl RecruitMode {
     }
 }
 
+/// Tracks the visual click marker entity for click-to-move targets
+#[derive(Resource, Default)]
+pub struct ClickMarker {
+    pub entity: Option<Entity>,
+    pub position: Vec2,
+}
+
 pub struct PlayerPlugin;
 
 #[derive(Resource)]
@@ -146,6 +154,7 @@ impl Plugin for PlayerPlugin {
             .init_resource::<RecruitMode>()
             .init_resource::<ActionContext>()
             .init_resource::<ToastQueue>()
+            .init_resource::<ClickMarker>()
             .add_message::<PlayerAction>()
             .add_systems(
                 Update,
@@ -163,6 +172,7 @@ impl Plugin for PlayerPlugin {
                 (
                     toggle_player_mode,
                     toggle_recruit_mode,
+                    player_click_to_move_input,  // NEW - early in chain
                     player_portal_transition,
                     player_movement,
                     player_nest_collision,
@@ -170,11 +180,18 @@ impl Plugin for PlayerPlugin {
                     player_drop,
                     player_regurgitate,
                     player_pheromone,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                Update,
+                (
                     player_recruit_pheromone,
                     player_dismiss_pheromone,
                     exchange_ant,
                     camera_follow_player,
                     update_player_visual,
+                    cleanup_click_marker,  // NEW - late in chain
                 )
                     .chain(),
             );
@@ -294,6 +311,9 @@ fn player_portal_transition(
     // If leaving nest, also clean up.
     commands.entity(player_entity).remove::<NestTask>();
     commands.entity(player_entity).remove::<NestPath>();
+    // Clear any active click-to-move target
+    commands.entity(player_entity).remove::<ClickMoveTarget>();
+    commands.entity(player_entity).remove::<SteeringTarget>();
 
     // Transition followers near the portal.
     let follower_range = PORTAL_RANGE * 3.0;
@@ -370,6 +390,86 @@ fn player_portal_transition(
 
 // ── Movement ────────────────────────────────────────────────────────
 
+/// Handle mouse left-click to set player movement target
+fn player_click_to_move_input(
+    mouse: Res<ButtonInput<MouseButton>>,
+    mode: Res<PlayerMode>,
+    registry: Res<MapRegistry>,
+    windows: Query<&Window>,
+    camera_query: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    mut commands: Commands,
+    mut marker: ResMut<ClickMarker>,
+    mut player_query: Query<
+        (Entity, &Transform, &MapId),
+        With<PlayerControlled>
+    >,
+    mut map_query: Query<(&NestGrid, &mut NestPathCache), With<MapMarker>>,
+) {
+    if !mode.controlling || !mouse.just_pressed(MouseButton::Left) {
+        return;
+    }
+
+    // Get world position from mouse cursor (same pattern as dig zones)
+    let Ok(window) = windows.single() else { return };
+    let Some(cursor_pos) = window.cursor_position() else { return };
+    let Ok((camera, cam_transform)) = camera_query.single() else { return };
+    let Ok(world_pos) = camera.viewport_to_world_2d(cam_transform, cursor_pos) else { return };
+
+    let Ok((player_entity, player_tf, map_id)) = player_query.single_mut() else { return };
+    let player_pos = player_tf.translation.truncate();
+
+    let is_underground = map_id.0 != registry.surface;
+
+    if is_underground {
+        // NEST: Use pathfinding + SteeringTarget
+        let Ok((grid, mut path_cache)) = map_query.get_mut(map_id.0) else { return };
+        let Some(start_grid) = world_to_nest_grid(player_pos) else { return };
+        let Some(goal_grid) = world_to_nest_grid(world_pos) else { return };
+
+        // Find path using A*
+        if let Some(waypoints) = path_cache.find_path(grid, start_grid, goal_grid) {
+            // Convert to world coordinates
+            let world_waypoints: Vec<Vec2> = waypoints
+                .iter()
+                .map(|&(gx, gy)| nest_grid_to_world(gx, gy))
+                .collect();
+
+            commands.entity(player_entity).insert((
+                SteeringTarget::Path {
+                    waypoints: world_waypoints.clone(),
+                    index: 0,
+                },
+                SteeringWeights::default(),
+                ClickMoveTarget {
+                    target: world_pos,
+                    on_surface: false,
+                },
+            ));
+        }
+    } else {
+        // SURFACE: Direct target (no pathfinding needed)
+        commands.entity(player_entity).insert(ClickMoveTarget {
+            target: world_pos,
+            on_surface: true,
+        });
+    }
+
+    // Update visual marker
+    marker.position = world_pos;
+    if let Some(marker_entity) = marker.entity {
+        commands.entity(marker_entity).despawn();
+    }
+    marker.entity = Some(commands.spawn((
+        Sprite {
+            color: Color::srgba(1.0, 1.0, 0.0, 0.5),
+            custom_size: Some(Vec2::splat(8.0)),
+            ..default()
+        },
+        Transform::from_xyz(world_pos.x, world_pos.y, 5.0),
+        MapId(map_id.0),
+    )).id());
+}
+
 fn player_movement(
     clock: Res<SimClock>,
     time: Res<Time>,
@@ -377,62 +477,125 @@ fn player_movement(
     mode: Res<PlayerMode>,
     registry: Res<MapRegistry>,
     nest_query: Query<&NestGrid, With<MapMarker>>,
-    mut query: Query<(&mut Transform, &Movement, &mut Ant, &MapId), With<PlayerControlled>>,
+    mut commands: Commands,
+    mut query: Query<
+        (Entity, &mut Transform, &Movement, &mut Ant, &MapId, Option<&ClickMoveTarget>),
+        With<PlayerControlled>
+    >,
 ) {
     if !mode.controlling || clock.speed == SimSpeed::Paused {
         return;
     }
 
-    let Ok((mut transform, movement, mut ant, map_id)) = query.single_mut() else {
+    let Ok((player_entity, mut transform, movement, mut ant, map_id, click_target)) = query.single_mut() else {
         return;
     };
 
+    // Check for keyboard input (WASD only - arrows now reserved for camera)
     let mut dir = Vec2::ZERO;
-    if input.pressed(KeyCode::KeyW) || input.pressed(KeyCode::ArrowUp) {
+    if input.pressed(KeyCode::KeyW) {
         dir.y += 1.0;
     }
-    if input.pressed(KeyCode::KeyS) || input.pressed(KeyCode::ArrowDown) {
+    if input.pressed(KeyCode::KeyS) {
         dir.y -= 1.0;
     }
-    if input.pressed(KeyCode::KeyA) || input.pressed(KeyCode::ArrowLeft) {
+    if input.pressed(KeyCode::KeyA) {
         dir.x -= 1.0;
     }
-    if input.pressed(KeyCode::KeyD) || input.pressed(KeyCode::ArrowRight) {
+    if input.pressed(KeyCode::KeyD) {
         dir.x += 1.0;
     }
 
-    if dir == Vec2::ZERO {
+    let is_underground = map_id.0 != registry.surface;
+
+    // Keyboard input interrupts click-to-move
+    if dir != Vec2::ZERO {
+        if click_target.is_some() {
+            commands.entity(player_entity)
+                .remove::<ClickMoveTarget>()
+                .remove::<SteeringTarget>();
+        }
+
+        let dir = dir.normalize();
+
+        if is_underground {
+            // Underground keyboard movement (unchanged)
+            let speed = NEST_PLAYER_SPEED * clock.speed.multiplier() * time.delta_secs();
+            let new_x = transform.translation.x + dir.x * speed;
+            let new_y = transform.translation.y + dir.y * speed;
+            let new_pos = Vec2::new(new_x, new_y);
+
+            if let Ok(grid) = nest_query.get(map_id.0) {
+                if let Some((gx, gy)) = world_to_nest_grid(new_pos) {
+                    if grid.get(gx, gy).is_passable() {
+                        transform.translation.x = new_x;
+                        transform.translation.y = new_y;
+                    }
+                }
+            }
+        } else {
+            // Surface keyboard movement (unchanged)
+            let speed = movement.speed * clock.speed.multiplier() * time.delta_secs();
+            transform.translation.x += dir.x * speed;
+            transform.translation.y += dir.y * speed;
+        }
+
+        if ant.state != AntState::Returning {
+            ant.state = AntState::Foraging;
+        }
         return;
     }
 
-    let dir = dir.normalize();
-    let is_underground = map_id.0 != registry.surface;
+    // Handle click-to-move if active
+    if let Some(click) = click_target {
+        let player_pos = transform.translation.truncate();
 
-    if is_underground {
-        // Underground: use nest speed, check passability before moving.
-        let speed = NEST_PLAYER_SPEED * clock.speed.multiplier() * time.delta_secs();
-        let new_x = transform.translation.x + dir.x * speed;
-        let new_y = transform.translation.y + dir.y * speed;
-        let new_pos = Vec2::new(new_x, new_y);
+        // Check if different map type (player transitioned through portal)
+        if is_underground != !click.on_surface {
+            commands.entity(player_entity)
+                .remove::<ClickMoveTarget>()
+                .remove::<SteeringTarget>();
+            return;
+        }
 
-        if let Ok(grid) = nest_query.get(map_id.0) {
-            if let Some((gx, gy)) = world_to_nest_grid(new_pos) {
-                if grid.get(gx, gy).is_passable() {
-                    transform.translation.x = new_x;
-                    transform.translation.y = new_y;
+        if is_underground {
+            // NEST: Steering system handles movement via SteeringTarget
+            // Check if reached destination
+            if player_pos.distance(click.target) < 5.0 {
+                commands.entity(player_entity)
+                    .remove::<ClickMoveTarget>()
+                    .remove::<SteeringTarget>();
+            }
+        } else {
+            // SURFACE: Direct movement toward target
+            let to_target = click.target - player_pos;
+            let dist = to_target.length();
+
+            if dist < 3.0 {
+                // Reached target
+                transform.translation.x = click.target.x;
+                transform.translation.y = click.target.y;
+                commands.entity(player_entity).remove::<ClickMoveTarget>();
+            } else {
+                // Move toward target
+                let dir = to_target.normalize();
+                let speed = movement.speed * clock.speed.multiplier() * time.delta_secs();
+                let step = dir * speed;
+
+                if step.length() > dist {
+                    transform.translation.x = click.target.x;
+                    transform.translation.y = click.target.y;
+                    commands.entity(player_entity).remove::<ClickMoveTarget>();
+                } else {
+                    transform.translation.x += step.x;
+                    transform.translation.y += step.y;
                 }
             }
-            // If out of bounds or not passable, don't move.
         }
-    } else {
-        // Surface: existing logic.
-        let speed = movement.speed * clock.speed.multiplier() * time.delta_secs();
-        transform.translation.x += dir.x * speed;
-        transform.translation.y += dir.y * speed;
-    }
 
-    if ant.state != AntState::Returning {
-        ant.state = AntState::Foraging;
+        if ant.state != AntState::Returning {
+            ant.state = AntState::Foraging;
+        }
     }
 }
 
@@ -825,14 +988,17 @@ fn update_follower_count(
 fn camera_follow_player(
     mode: Res<PlayerMode>,
     active: Res<crate::resources::active_map::ActiveMap>,
-    player_query: Query<(&Transform, &crate::components::map::MapId), (With<PlayerControlled>, Without<MainCamera>)>,
+    player_query: Query<
+        (&Transform, &crate::components::map::MapId, Option<&ClickMoveTarget>),
+        (With<PlayerControlled>, Without<MainCamera>)
+    >,
     mut camera_query: Query<&mut Transform, With<MainCamera>>,
 ) {
     if !mode.follow_camera {
         return;
     }
 
-    let Ok((player_tf, player_map)) = player_query.single() else {
+    let Ok((player_tf, player_map, click_target)) = player_query.single() else {
         return;
     };
 
@@ -845,9 +1011,12 @@ fn camera_follow_player(
         return;
     };
 
+    // Optionally: increase lerp factor during click-to-move for better visibility
+    let lerp_factor = if click_target.is_some() { 0.15 } else { 0.08 };
+
     let target = player_tf.translation.truncate();
     let current = cam_tf.translation.truncate();
-    let smoothed = current.lerp(target, 0.08);
+    let smoothed = current.lerp(target, lerp_factor);
     cam_tf.translation.x = smoothed.x;
     cam_tf.translation.y = smoothed.y;
 }
@@ -865,6 +1034,20 @@ fn update_player_visual(
         PLAYER_COLOR
     };
     sprite.custom_size = Some(Vec2::splat(6.0));
+}
+
+/// Clean up the click marker when the click-to-move target is cleared
+fn cleanup_click_marker(
+    mut commands: Commands,
+    mut marker: ResMut<ClickMarker>,
+    player_query: Query<&ClickMoveTarget, With<PlayerControlled>>,
+) {
+    if player_query.single().is_err() {
+        // No active click target, clean up marker
+        if let Some(entity) = marker.entity.take() {
+            commands.entity(entity).despawn();
+        }
+    }
 }
 
 // ── Keyboard→event bridge ──────────────────────────────────────────

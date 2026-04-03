@@ -134,6 +134,13 @@ impl PortalCooldown {
     }
 }
 
+/// Tracks an active click-to-move target for the player-controlled ant
+#[derive(Component, Debug, Clone)]
+pub struct ClickMoveTarget {
+    pub target: Vec2,
+    pub on_surface: bool,  // Track map type to detect portal transitions
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DamageSource {
     EnemyAnt,
