@@ -7,15 +7,29 @@ Here are the detailed sprint plans for LDtk integration, formatted to match your
 
 # LDtk Map Integration — Sprint Plans
 
+## Progress
+
+| Sprint | Status | Notes |
+|--------|--------|-------|
+| **L1** | **Done** | Surface loads from LDtk, tilemap rendering, MapId tagging |
+| **L2** | **Done** | Nest IntGrid pipeline, NestGrid::from_intgrid, TileColor mutation on dig |
+| **L3** | **Done** | Entity integration (food/portal/queen/entrance from LDtk), portal wiring by portal_id, dig task bug fix |
+| **L4** | Not started | Tilesets, multiple layouts, campaign prep |
+
+**Open items from L2/L3:**
+- Nest dimensions still use NEST_WIDTH/NEST_HEIGHT constants (not dynamic from LDtk metadata)
+- Hot-reload not implemented
+- MapRegistry still built statically in PreStartup; dynamic level discovery deferred to L4
+
 ## Overview
 
 4 sprints (L1–L4). Each produces a runnable build. L1–L2 are sequential. L3 depends on L2. L4 is polish/content and can overlap with Sprint 21 (Campaign).
 
 ```
-Sprint L1  ████░░░░░░░░░░░░  LDtk Foundation & Surface Map
-Sprint L2  ████████░░░░░░░░  Nest IntGrid Pipeline
-Sprint L3  ████████████░░░░  Entity Integration & Portals
-Sprint L4  ████████████████  Polish, Tilesets & Campaign Prep
+Sprint L1  ████████████████  LDtk Foundation & Surface Map         ✅ DONE
+Sprint L2  ████████████████  Nest IntGrid Pipeline                 ✅ DONE
+Sprint L3  ████████████████  Entity Integration & Portals          ✅ DONE
+Sprint L4  ░░░░░░░░░░░░░░░░  Polish, Tilesets & Campaign Prep
 ```
 
 **Dependency chain:**
@@ -57,13 +71,13 @@ Add `bevy_ecs_ldtk` + `bevy_ecs_tilemap` dependencies, create the LDtk project f
 > Launch game. Surface map now loads from the LDtk file instead of spawning individual grass sprites. Tilemap renders via `bevy_ecs_tilemap` chunked rendering — visually identical checkerboard pattern but more GPU-efficient. All existing gameplay (foraging, pheromones, combat, hazards) works unchanged. Tab to nest view — still uses old procedural rendering (Sprint L2).
 
 ### Acceptance Criteria
-- [ ] `bevy_ecs_ldtk` compiles and runs with Bevy 0.18
-- [ ] Surface level loads from `.ldtk` file
-- [ ] Grass tilemap renders correctly (matches old visual)
-- [ ] [MapId](cci:2://file:///Users/mfreshour/src/ant-col-test-split-nest-ai/src/components/map.rs:5:0-5:29) tagging works — visibility toggle via Tab still functions
-- [ ] Ants forage/return/fight normally on the LDtk surface
-- [ ] Pheromone overlay still renders on top of tilemap
-- [ ] No regression in existing tests
+- [x] `bevy_ecs_ldtk` compiles and runs with Bevy 0.18
+- [x] Surface level loads from `.ldtk` file
+- [x] Grass tilemap renders correctly (matches old visual)
+- [x] MapId tagging works — visibility toggle via Tab still functions
+- [x] Ants forage/return/fight normally on the LDtk surface
+- [x] Pheromone overlay still renders on top of tilemap
+- [x] No regression in existing tests
 
 **Files touched:**
 - [Cargo.toml](cci:7://file:///Users/mfreshour/src/ant-col-test-split-nest-ai/Cargo.toml:0:0-0:0) — add `bevy_ecs_ldtk`
@@ -107,14 +121,14 @@ Create nest levels in LDtk using IntGrid layers. Build a sync pipeline that popu
 > Tab to nest view. The underground map now loads from the LDtk file — same layout as before but rendered via `bevy_ecs_tilemap`. Ants navigate tunnels, nurse brood, and dig new passages. When a digger excavates soil, the tilemap tile visually updates to tunnel coloring. Open the LDtk editor, move the queen chamber deeper, save — hot-reload updates the nest layout in-game.
 
 ### Acceptance Criteria
-- [ ] PlayerNest and RedNest levels load from LDtk IntGrid
-- [ ] [NestGrid](cci:2://file:///Users/mfreshour/src/ant-col-test-split-nest-ai/src/resources/nest.rs:9:0-13:1) is populated from LDtk data (not hardcoded [default()](cci:1://file:///Users/mfreshour/src/ant-col-test-split-nest-ai/src/resources/simulation.rs:51:4-57:5))
+- [x] PlayerNest and RedNest levels load from LDtk IntGrid
+- [x] NestGrid is populated from LDtk data (not hardcoded default())
 - [ ] Nest dimensions are read from LDtk level metadata
-- [ ] Excavation visually updates tilemap tiles in real-time
-- [ ] Pathfinding and pheromone grids work with LDtk-loaded dimensions
-- [ ] [nest_grid_to_world](cci:1://file:///Users/mfreshour/src/ant-col-test-split-nest-ai/src/plugins/nest.rs:29:0-36:1) coordinate conversion matches LDtk layout
-- [ ] Existing nest AI (nursing, hauling, queen care, digging) all function correctly
-- [ ] Unit tests for `from_ldtk` pass
+- [x] Excavation visually updates tilemap tiles in real-time
+- [x] Pathfinding and pheromone grids work with LDtk-loaded dimensions
+- [x] nest_grid_to_world coordinate conversion matches LDtk layout
+- [x] Existing nest AI (nursing, hauling, queen care, digging) all function correctly
+- [x] Unit tests for `from_intgrid` pass
 - [ ] Hot-reload of `.ldtk` file updates nest layout
 
 **Files touched:**
@@ -162,17 +176,17 @@ Move food sources, portal positions, queen spawn points, and nest entrance marke
 > All map content now comes from the LDtk project file. Open LDtk editor — drag food sources to new positions, save, hot-reload. Food appears in new locations. Move the queen spawn marker deeper in the nest — queen now starts there. Add a third nest level ("SpecialZone") with its own portal — it appears in the Tab cycle. All portal transitions, food foraging, nest AI, and combat work as before.
 
 ### Acceptance Criteria
-- [ ] Food sources load from LDtk entity fields (amount, size)
-- [ ] Portal pairs auto-wire across levels by `portal_id`
-- [ ] Queen spawn position comes from LDtk entity
-- [ ] Nest entrance marker comes from LDtk entity
-- [ ] [MapRegistry](cci:2://file:///Users/mfreshour/src/ant-col-test-split-nest-ai/src/resources/active_map.rs:28:0-37:1) built dynamically from spawned levels
-- [ ] [MapId](cci:2://file:///Users/mfreshour/src/ant-col-test-split-nest-ai/src/components/map.rs:5:0-5:29) correctly assigned to all LDtk-spawned entities
+- [x] Food sources load from LDtk entity fields (amount, size)
+- [x] Portal pairs auto-wire across levels by `portal_id`
+- [x] Queen spawn position comes from LDtk entity
+- [x] Nest entrance marker comes from LDtk entity
+- [ ] MapRegistry built dynamically from spawned levels (still built in PreStartup; LDtk entities populate it)
+- [x] MapId correctly assigned to all LDtk-spawned entities
 - [ ] Adding a new level in LDtk automatically appears in the map cycle
-- [ ] No hardcoded positions remain in Rust code for map content
-- [ ] [random_food_drops](cci:1://file:///Users/mfreshour/src/ant-col-test-split-nest-ai/src/plugins/terrain.rs:143:0-195:1) still works for dynamic runtime food
-- [ ] All portal transitions function correctly
-- [ ] Tests pass
+- [x] No hardcoded positions remain in Rust code for map content
+- [x] random_food_drops still works for dynamic runtime food
+- [x] All portal transitions function correctly
+- [x] Tests pass
 
 **Files touched:**
 - `src/plugins/ldtk_maps.rs` — entity bundles (`LdtkEntity` derives), `wire_portals`, [MapRegistry](cci:2://file:///Users/mfreshour/src/ant-col-test-split-nest-ai/src/resources/active_map.rs:28:0-37:1) builder, [MapId](cci:2://file:///Users/mfreshour/src/ant-col-test-split-nest-ai/src/components/map.rs:5:0-5:29) tagger
