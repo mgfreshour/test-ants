@@ -69,6 +69,7 @@ impl StimulusThresholds {
     }
 }
 
+
 #[derive(Component)]
 pub struct Ant {
     pub caste: Caste,

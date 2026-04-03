@@ -104,7 +104,8 @@ fn colony_management_panel(
     mut aggression: ResMut<AggressionSettings>,
     mut overlay_state: ResMut<OverlayState>,
     mut nest_overlay_state: ResMut<NestPheromoneOverlayState>,
-    mut env: ResMut<crate::plugins::environment::EnvironmentState>,
+    env: Res<crate::plugins::environment::EnvironmentState>,
+    mut hazard_writer: MessageWriter<crate::plugins::environment::HazardEvent>,
     food_query: Query<&ColonyFood, With<MapMarker>>,
     mut sliders_query: Query<&mut BehaviorSliders, With<MapMarker>>,
     ant_query: Query<(&Ant, &ColonyMember, Option<&TrailSense>, Option<&NestTask>)>,
@@ -270,16 +271,16 @@ fn colony_management_panel(
                 ui.label("Trigger Event:");
                 ui.horizontal(|ui| {
                     if ui.button("☔ Rain").clicked() {
-                        env.manual_triggers.push(crate::plugins::environment::HazardTrigger::Rain);
+                        hazard_writer.write(crate::plugins::environment::HazardEvent::TriggerRain);
                     }
                     if ui.button("👣 Footstep").clicked() {
-                        env.manual_triggers.push(crate::plugins::environment::HazardTrigger::Footstep);
+                        hazard_writer.write(crate::plugins::environment::HazardEvent::TriggerFootstep);
                     }
                     if ui.button("🔪 Mower").clicked() {
-                        env.manual_triggers.push(crate::plugins::environment::HazardTrigger::Lawnmower);
+                        hazard_writer.write(crate::plugins::environment::HazardEvent::TriggerLawnmower);
                     }
                     if ui.button("☠️ Spray").clicked() {
-                        env.manual_triggers.push(crate::plugins::environment::HazardTrigger::Pesticide);
+                        hazard_writer.write(crate::plugins::environment::HazardEvent::TriggerPesticide);
                     }
                 });
             });
