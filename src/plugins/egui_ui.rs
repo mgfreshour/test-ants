@@ -636,7 +636,7 @@ fn minimap_panel(
     active: Res<ActiveMap>,
     config: Res<SimConfig>,
     env: Res<crate::plugins::environment::EnvironmentState>,
-    ant_query: Query<(&Transform, &ColonyMember), With<Ant>>,
+    ant_query: Query<(&Transform, &ColonyMember, Option<&PlayerControlled>), With<Ant>>,
     food_query: Query<(&Transform, &FoodSource)>,
     spider_query: Query<&Transform, With<Spider>>,
 ) {
@@ -761,9 +761,14 @@ fn minimap_panel(
             // Ants (sample to avoid performance issues)
             let mut player_count = 0u32;
             let mut enemy_count = 0u32;
-            for (tf, colony) in &ant_query {
+            let mut player_ant_pos: Option<(f32, f32, f32, f32)> = None;
+            for (tf, colony, player) in &ant_query {
                 let x = rect.left() + tf.translation.x * scale_x;
                 let y = rect.bottom() - tf.translation.y * scale_y;
+                if player.is_some() {
+                    player_ant_pos = Some((x, y, tf.translation.x, tf.translation.y));
+                    continue; // draw on top after all other ants
+                }
                 let color = if colony.colony_id == 0 {
                     player_count += 1;
                     if player_count % 3 != 0 { continue; } // sample every 3rd
@@ -774,6 +779,31 @@ fn minimap_panel(
                     egui::Color32::from_rgb(200, 40, 40)
                 };
                 painter.circle_filled(egui::pos2(x, y), 1.0, color);
+            }
+
+            // Player ant — yellow diamond on top
+            if let Some((px, py, wx, wy)) = player_ant_pos {
+                let s = 3.5;
+                let diamond = vec![
+                    egui::pos2(px, py - s),
+                    egui::pos2(px + s, py),
+                    egui::pos2(px, py + s),
+                    egui::pos2(px - s, py),
+                ];
+                painter.add(egui::Shape::convex_polygon(
+                    diamond,
+                    egui::Color32::from_rgb(255, 230, 0),
+                    egui::Stroke::new(1.0, egui::Color32::from_rgb(180, 160, 0)),
+                ));
+                // Coordinates label
+                let coord_text = format!("{:.0}, {:.0}", wx, wy);
+                painter.text(
+                    egui::pos2(rect.left() + 2.0, rect.bottom() - 12.0),
+                    egui::Align2::LEFT_TOP,
+                    coord_text,
+                    egui::FontId::proportional(9.0),
+                    egui::Color32::from_rgb(255, 230, 0),
+                );
             }
         });
 }
