@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use crate::components::ant::{PlayerControlled, StimulusThresholds};
 use crate::components::map::{MapId, MapMarker};
-use crate::components::nest::{AttendStep, Brood, BroodStage, DigStep, FeedStep, FoodEntity, HaulStep, MoveBroodStep, NestPath, NestTask, Queen, QueenHunger, StackedItem};
+use crate::components::nest::{AttendStep, Brood, BroodStage, DigStep, FeedStep, FoodEntity, HaulStep, MoveBroodStep, NestPath, NestTask, StackedItem};
 use crate::plugins::ant_ai::ColonyFood;
 use crate::plugins::nest_navigation::world_to_nest_grid;
 use crate::resources::nest::{NestGrid, PlayerDigZones};
@@ -24,7 +24,6 @@ pub(super) fn stimulus_scan(
     clock: Res<SimClock>,
     map_query: Query<(&NestGrid, &NestPheromoneGrid, &ColonyFood, Option<&PlayerDigZones>), With<MapMarker>>,
     brood_query: Query<(Entity, &Transform, &Brood, &MapId)>,
-    queen_query: Query<(&MapId, &QueenHunger), With<Queen>>,
     food_entity_query: Query<(&Transform, &MapId, Option<&StackedItem>), With<FoodEntity>>,
     mut query: Query<(Entity, &Transform, &MapId, &mut NestTask, &mut StimulusThresholds), Without<PlayerControlled>>,
 ) {
@@ -114,12 +113,11 @@ pub(super) fn stimulus_scan(
             if s > best_strength[2].1 { best_strength[2].1 = s; }
         }
 
-        // ── Hungry queen (pheromone-based, not proximity to queen entity) ──
-        if let Some((_, hunger)) = queen_query.iter().find(|(qm, _)| qm.0 == map_id.0) {
-            let queen_hunger_val = 1.0 - hunger.satiation.clamp(0.0, 1.0);
+        // ── Hungry queen (pure pheromone — hunger encoded in diffused signal) ──
+        {
             let queen_signal = phero_grid.get(ant_gp.0, ant_gp.1).queen_signal;
-            if queen_hunger_val > 0.1 && colony_food.stored > 0.5 {
-                let s = nest_stimuli::queen_stimulus_strength(queen_hunger_val, queen_signal);
+            if queen_signal > 0.0 && colony_food.stored > 0.5 {
+                let s = nest_stimuli::queen_stimulus_from_signal(queen_signal);
                 best_strength[3].1 = s;
             }
         }

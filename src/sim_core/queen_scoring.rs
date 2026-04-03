@@ -96,6 +96,19 @@ pub fn resting_decay_multiplier() -> f32 {
     0.5
 }
 
+/// Baseline signal emitted even when queen is fully fed, so workers can
+/// still locate the queen for non-hunger tasks. Must be low enough that
+/// it doesn't trigger attend-queen stimulus on its own.
+const QUEEN_SIGNAL_BASELINE: f32 = 0.15;
+
+/// Compute the queen signal strength to emit at the queen's position.
+/// `hunger_frac`: 0.0 = fully fed, 1.0 = starving.
+/// `max_strength`: config-driven cap (typically 1.0).
+pub fn queen_hunger_signal(hunger_frac: f32, max_strength: f32) -> f32 {
+    let scaled = QUEEN_SIGNAL_BASELINE + (1.0 - QUEEN_SIGNAL_BASELINE) * hunger_frac;
+    (scaled * max_strength).clamp(0.0, max_strength)
+}
+
 // ── Builder for tests ──────────────────────────────────────────────
 
 impl QueenScoringInput {
@@ -194,5 +207,33 @@ mod tests {
     #[test]
     fn resting_decay_multiplier_is_half() {
         assert_eq!(resting_decay_multiplier(), 0.5);
+    }
+
+    // ── Phase 5: hunger signal tests ──
+
+    #[test]
+    fn hunger_signal_scales_with_hunger() {
+        let fed = queen_hunger_signal(0.0, 1.0);
+        let starving = queen_hunger_signal(1.0, 1.0);
+        assert!(starving > fed, "starving {starving} should exceed fed {fed}");
+    }
+
+    #[test]
+    fn hunger_signal_has_baseline_when_fed() {
+        let signal = queen_hunger_signal(0.0, 1.0);
+        assert!(signal > 0.1, "fed queen should still emit baseline signal, got {signal}");
+        assert!(signal < 0.25, "fed queen signal should be low, got {signal}");
+    }
+
+    #[test]
+    fn hunger_signal_reaches_max_when_starving() {
+        let signal = queen_hunger_signal(1.0, 1.0);
+        assert!((signal - 1.0).abs() < 0.01, "starving queen should emit max signal, got {signal}");
+    }
+
+    #[test]
+    fn hunger_signal_respects_max_strength() {
+        let signal = queen_hunger_signal(1.0, 0.5);
+        assert!(signal <= 0.5, "signal {signal} should not exceed max_strength 0.5");
     }
 }

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::components::map::{MapId, MapMarker, MapPortal};
-use crate::components::nest::{Brood, BroodStage, CellType, Queen};
+use crate::components::nest::{Brood, BroodStage, CellType, Queen, QueenHunger};
 use crate::components::map::MapKind;
 use crate::resources::active_map::{ActiveMap, MapRegistry, viewing_nest};
 use crate::resources::nest::{NestGrid, NEST_CELL_SIZE, NEST_HEIGHT, NEST_WIDTH};
@@ -62,22 +62,31 @@ fn nest_pheromone_decay(
     }
 }
 
-/// Queen emits signal at her position into her map's pheromone grid.
+/// Queen emits hunger-proportional signal at her position.
+/// Hungry queen emits stronger signal; well-fed queen emits weaker signal.
+/// Workers read only this diffused signal — no direct QueenHunger access.
 fn queen_signal_emission(
     clock: Res<SimClock>,
     config: Res<NestPheromoneConfig>,
     mut map_query: Query<&mut NestPheromoneGrid, With<MapMarker>>,
-    queen_query: Query<(&Transform, &MapId), With<Queen>>,
+    queen_query: Query<(&Transform, &MapId, &QueenHunger), With<Queen>>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
     }
 
-    for (transform, map_id) in &queen_query {
+    for (transform, map_id, hunger) in &queen_query {
         let Ok(mut phero_grid) = map_query.get_mut(map_id.0) else { continue };
         if let Some((gx, gy)) = world_to_nest_grid(transform.translation.truncate()) {
             if let Some(cell) = phero_grid.get_mut(gx, gy) {
-                cell.queen_signal = config.queen_signal_strength;
+                // Encode hunger into signal: starving (satiation=0) → full strength,
+                // fully fed (satiation=1) → baseline signal so workers can still locate queen.
+                let hunger_frac = 1.0 - hunger.satiation.clamp(0.0, 1.0);
+                let signal = crate::sim_core::queen_scoring::queen_hunger_signal(
+                    hunger_frac,
+                    config.queen_signal_strength,
+                );
+                cell.queen_signal = signal;
             }
         }
     }

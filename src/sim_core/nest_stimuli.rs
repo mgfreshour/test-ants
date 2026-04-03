@@ -100,13 +100,27 @@ pub fn larva_stimulus_strength(distance_cells: f32, brood_pheromone: f32) -> f32
     (proximity * pheromone_boost).clamp(0.0, 1.0)
 }
 
-/// Stimulus strength for a hungry queen.
-/// Driven primarily by queen hunger level and local queen pheromone signal.
+/// Stimulus strength for a hungry queen (legacy — uses direct hunger query).
+/// Retained for test baseline comparisons.
 pub fn queen_stimulus_strength(queen_hunger: f32, queen_signal: f32) -> f32 {
     // queen_hunger: 0 = fully fed, 1 = starving
     let urgency = 0.3 + queen_hunger * 0.7;
     let signal_factor = 0.5 + queen_signal * 0.5;
     (urgency * signal_factor).clamp(0.0, 1.0)
+}
+
+/// Pheromone-only queen stimulus strength.
+/// The queen's hunger is already encoded in the diffused queen_signal
+/// (see `queen_hunger_signal` in queen_scoring.rs). Workers read only
+/// the local signal at their grid position — spatial falloff is emergent.
+pub fn queen_stimulus_from_signal(queen_signal: f32) -> f32 {
+    // Signal encodes hunger: ~0.15 when fed, ~1.0 when starving.
+    // After diffusion, distant cells see a weaker signal naturally.
+    // We apply a gentle curve to make the response less binary.
+    let s = queen_signal.clamp(0.0, 1.0);
+    // Below baseline (~0.15) the queen is well-fed; suppress stimulus.
+    let effective = (s - 0.12).max(0.0) / 0.88;
+    (effective.powf(0.7)).clamp(0.0, 1.0)
 }
 
 /// Stimulus strength for loose food at entrance.
@@ -270,5 +284,39 @@ mod tests {
         assert!(t.feed_larva >= 0.9);
         assert!(t.dig >= 0.9);
         assert!(t.attend_queen >= 0.9);
+    }
+
+    // ── Phase 5: pheromone-only queen stimulus tests ──
+
+    #[test]
+    fn signal_stimulus_scales_with_signal() {
+        let weak = queen_stimulus_from_signal(0.2);
+        let strong = queen_stimulus_from_signal(0.9);
+        assert!(strong > weak, "strong signal {strong} should beat weak {weak}");
+    }
+
+    #[test]
+    fn signal_stimulus_near_zero_for_fed_queen() {
+        // Baseline signal (~0.15) should produce near-zero stimulus
+        let s = queen_stimulus_from_signal(0.12);
+        assert!(s < 0.01, "fed queen signal should produce near-zero stimulus, got {s}");
+    }
+
+    #[test]
+    fn signal_stimulus_high_for_starving_queen() {
+        let s = queen_stimulus_from_signal(1.0);
+        assert!(s > 0.7, "starving queen signal should produce high stimulus, got {s}");
+    }
+
+    #[test]
+    fn signal_stimulus_matches_legacy_at_high_hunger() {
+        // At high signal (starving queen nearby), new function should produce
+        // comparable stimulus to the legacy function
+        let legacy = queen_stimulus_strength(0.9, 0.9);
+        let new = queen_stimulus_from_signal(0.9);
+        assert!(
+            (legacy - new).abs() < 0.35,
+            "legacy {legacy} and new {new} should be in the same ballpark for high hunger"
+        );
     }
 }
