@@ -48,6 +48,24 @@ impl CellType {
         matches!(self, CellType::Soil | CellType::SoftSoil | CellType::Clay)
     }
 
+    /// Tileset tile index for this cell type in `nest.png`.
+    /// Must match the tile order in `assets/tilesets/nest.png`.
+    pub fn tile_index(&self) -> u32 {
+        match self {
+            CellType::Soil => 0,
+            CellType::SoftSoil => 1,
+            CellType::Clay => 2,
+            CellType::Rock => 3,
+            CellType::Tunnel => 4,
+            CellType::Chamber(kind) => match kind {
+                ChamberKind::Queen => 5,
+                ChamberKind::Brood => 6,
+                ChamberKind::FoodStorage => 7,
+                ChamberKind::Midden => 8,
+            },
+        }
+    }
+
     /// Excavation time in seconds for this soil type.
     pub fn dig_duration(&self) -> f32 {
         match self {

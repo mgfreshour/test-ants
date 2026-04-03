@@ -14,33 +14,39 @@ Here are the detailed sprint plans for LDtk integration, formatted to match your
 | **L1** | **Done** | Surface loads from LDtk, tilemap rendering, MapId tagging |
 | **L2** | **Done** | Nest IntGrid pipeline, NestGrid::from_intgrid, TileColor mutation on dig |
 | **L3** | **Done** | Entity integration (food/portal/queen/entrance from LDtk), portal wiring by portal_id, dig task bug fix |
-| **L4** | Not started | Tilesets, multiple layouts, campaign prep |
+| **L4** | **Done** | Pixel-art tilesets, auto-rules for surface and nest, TileTextureIndex mutation on dig |
+| **L5** | Not started | Layout variants & biomes |
+| **L6** | Not started | Campaign prep & documentation |
 
 **Open items from L2/L3:**
-- Nest dimensions still use NEST_WIDTH/NEST_HEIGHT constants (not dynamic from LDtk metadata)
+- Nest dimensions still use NEST_WIDTH/NEST_HEIGHT constants (not dynamic from LDtk metadata) → L6
 - Hot-reload not implemented
-- MapRegistry still built statically in PreStartup; dynamic level discovery deferred to L4
+- MapRegistry still built statically in PreStartup; dynamic level discovery deferred to L6
 
 ## Overview
 
-4 sprints (L1–L4). Each produces a runnable build. L1–L2 are sequential. L3 depends on L2. L4 is polish/content and can overlap with Sprint 21 (Campaign).
+6 sprints (L1–L6). Each produces a runnable build. L1–L3 are sequential. L4–L6 are polish/content sprints that depend on L3 but are independent of each other and can overlap with Sprint 21 (Campaign).
 
 ```
 Sprint L1  ████████████████  LDtk Foundation & Surface Map         ✅ DONE
 Sprint L2  ████████████████  Nest IntGrid Pipeline                 ✅ DONE
 Sprint L3  ████████████████  Entity Integration & Portals          ✅ DONE
-Sprint L4  ░░░░░░░░░░░░░░░░  Polish, Tilesets & Campaign Prep
+Sprint L4  ████████████████  Tilesets & Auto-Rules                 ✅ DONE
+Sprint L5  ░░░░░░░░░░░░░░░░  Layout Variants & Biomes
+Sprint L6  ░░░░░░░░░░░░░░░░  Campaign Prep & Documentation
 ```
 
 **Dependency chain:**
 ```
-Sprint L1 ──► Sprint L2 ──► Sprint L3 ──► Sprint L4
-(foundation)  (nest grids)  (entities &    (tilesets &
-                             portals)       campaign maps)
-                                │
-                                ▼
-                          Sprint 21 (Campaign Mode)
+Sprint L1 ──► Sprint L2 ──► Sprint L3 ──┬── Sprint L4 (tilesets)
+(foundation)  (nest grids)  (entities &  ├── Sprint L5 (variants & biomes)
+                             portals)    └── Sprint L6 (campaign prep)
+                                                  │
+                                                  ▼
+                                            Sprint 21 (Campaign Mode)
 ```
+
+L4–L6 can run **in parallel** — they touch different files and concerns.
 
 **Prerequisites:** None — these sprints are independent of the ant unification track (Sprints 12–18). However, L3's portal wiring benefits from Sprint 14 (job-driven transitions) being complete.
 
@@ -197,10 +203,10 @@ Move food sources, portal positions, queen spawn points, and nest entrance marke
 
 ---
 
-## Sprint L4: Tilesets, Multiple Layouts & Campaign Prep
+## Sprint L4: Tilesets & Auto-Rules
 
 ### Goal
-Replace placeholder solid-color tilesets with proper pixel art. Create multiple nest layout variants for campaign use. Add LDtk Auto-Rules for terrain variation. Establish the asset pipeline for Sprint 21 (Campaign Mode) where each yard patch is an LDtk level.
+Replace placeholder solid-color tilesets with proper pixel art for both surface and nest. Set up LDtk Auto-Rules so maps look natural without manual tile-by-tile painting.
 
 ### Tasks
 
@@ -210,38 +216,95 @@ Replace placeholder solid-color tilesets with proper pixel art. Create multiple 
 | L4.2 | Create proper nest tileset: soil (light/dark), soft soil, clay, rock (3 variants), tunnel (4 directional joins), chamber floors (queen=purple tint, brood=warm, food=gold, midden=grey). At least 20 tiles | 6h |
 | L4.3 | Set up LDtk Auto-Rules for surface: grass variation (random 3-tile grass), dirt paths, concrete edges, biome transitions | 4h |
 | L4.4 | Set up LDtk Auto-Rules for nest: tunnel connections (auto-pick correct tunnel join tile based on neighbors), chamber borders, rock clusters | 4h |
-| L4.5 | Create 3 nest layout variants: "Shallow" (wide, near surface), "Deep" (vertical, deep queen chamber), "Complex" (branching tunnels, multiple exits). Each as a separate LDtk level | 5h |
-| L4.6 | Create 3 surface terrain variants for campaign patches: "Garden" (lots of food, few hazards), "Concrete" (sparse food, fast ants), "Wooded" (dense obstacles, predator spawns) | 5h |
-| L4.7 | Add LDtk Enum definitions mirroring `BiomeType` (`@/Users/mfreshour/src/ant-col-test-split-nest-ai/src/components/terrain.rs:4-9`). Tag surface tiles with biome enum for gameplay effects | 3h |
-| L4.8 | Implement `LdtkIntCell` for `BiomeTile` bundle: surface IntGrid layer with biome values, used by environment systems for terrain-dependent behavior (e.g., sand = faster evaporation) | 3h |
-| L4.9 | Add level metadata custom fields in LDtk: `difficulty: Int`, `biome: Enum`, `nest_variant: String`. Read these in `LdtkMapsPlugin` to configure per-level gameplay parameters | 3h |
-| L4.10 | Create `assets/maps/campaign.ldtk` — separate LDtk project for campaign with 16+ patch levels. Or extend `colony.ldtk` with a world layout using LDtk's multi-world feature | 4h |
-| L4.11 | Document LDtk editing workflow: how to add a new level, required layers, entity placement rules, tileset conventions. Add to `docs/LDTK_MAP_EDITING.md` | 3h |
-| L4.12 | Performance benchmark: surface with full tileset vs. old sprite approach. Measure FPS with 5K ants + pheromone overlay | 2h |
-| L4.13 | Build check + runtime validation with new tilesets | 2h |
+| L4.5 | Performance benchmark: surface with full tileset vs. old sprite approach. Measure FPS with 5K ants + pheromone overlay | 2h |
+| L4.6 | Build check + runtime validation with new tilesets | 2h |
 
 ### Demo
-> Surface now has proper pixel-art grass with natural variation — LDtk Auto-Rules create organic-looking terrain. Underground nests have directional tunnel tiles and tinted chamber floors. Open LDtk editor to show 3 nest variants: Shallow (quick to traverse), Deep (defensible), Complex (maze-like). Switch to campaign project — 16 yard patches visible in LDtk's world view, each with different biomes and food layouts. All ready for Sprint 21 campaign integration.
+> Surface now has proper pixel-art grass with natural variation — LDtk Auto-Rules create organic-looking terrain. Underground nests have directional tunnel tiles and tinted chamber floors. All existing gameplay works unchanged with the new visuals.
 
 ### Acceptance Criteria
-- [ ] Surface renders with varied pixel-art tileset (not solid colors)
-- [ ] Nest renders with directional tunnel joins and tinted chambers
-- [ ] LDtk Auto-Rules produce natural-looking terrain variation
-- [ ] 3 nest layout variants exist and are loadable
-- [ ] 3 surface terrain variants exist for campaign use
-- [ ] Biome enum tags affect gameplay (e.g., terrain speed modifiers)
-- [ ] Level metadata fields readable from Rust
-- [ ] Campaign LDtk project with 16+ levels exists
-- [ ] `LDTK_MAP_EDITING.md` documents the workflow
-- [ ] Performance is equal or better than old sprite approach
+- [x] Surface renders with varied pixel-art tileset (not solid colors)
+- [x] Nest renders with directional tunnel joins and tinted chambers
+- [x] LDtk Auto-Rules produce natural-looking terrain variation
+- [ ] Performance is equal or better than old sprite approach (not benchmarked yet)
 
 **Files touched:**
 - `assets/tilesets/terrain.png` — proper pixel art
 - `assets/tilesets/nest.png` — proper pixel art
-- `assets/maps/colony.ldtk` — auto-rules, nest variants
-- `assets/maps/campaign.ldtk` (new) — campaign patch levels
+- `assets/maps/colony.ldtk` — auto-rules applied to existing levels
+
+**Risks:**
+- Auto-Rule authoring is iterative and hard to estimate — budget time for tweaking.
+- Directional tunnel joins require 4+ rule patterns per join type, which can get complex in LDtk.
+
+---
+
+## Sprint L5: Layout Variants & Biomes
+
+### Goal
+Create multiple nest and surface layout variants for gameplay variety. Add biome tagging so terrain type affects gameplay mechanics.
+
+### Tasks
+
+| # | Task | Est |
+|---|---|---|
+| L5.1 | Create 3 nest layout variants: "Shallow" (wide, near surface), "Deep" (vertical, deep queen chamber), "Complex" (branching tunnels, multiple exits). Each as a separate LDtk level | 5h |
+| L5.2 | Create 3 surface terrain variants for campaign patches: "Garden" (lots of food, few hazards), "Concrete" (sparse food, fast ants), "Wooded" (dense obstacles, predator spawns) | 5h |
+| L5.3 | Add LDtk Enum definitions mirroring `BiomeType`. Tag surface tiles with biome enum for gameplay effects | 3h |
+| L5.4 | Implement `LdtkIntCell` for `BiomeTile` bundle: surface IntGrid layer with biome values, used by environment systems for terrain-dependent behavior (e.g., sand = faster evaporation) | 3h |
+| L5.5 | Add level metadata custom fields in LDtk: `difficulty: Int`, `biome: Enum`, `nest_variant: String`. Read these in `LdtkMapsPlugin` to configure per-level gameplay parameters | 3h |
+| L5.6 | Build check + runtime validation — variants load, biome tags affect gameplay | 2h |
+
+### Demo
+> Open LDtk editor to show 3 nest variants: Shallow (quick to traverse), Deep (defensible), Complex (maze-like). Surface variants show different biomes — garden patches have plentiful food, concrete areas are sparse. Biome tags drive gameplay effects like pheromone evaporation rate.
+
+### Acceptance Criteria
+- [ ] 3 nest layout variants exist and are loadable
+- [ ] 3 surface terrain variants exist for campaign use
+- [ ] Biome enum tags affect gameplay (e.g., terrain speed modifiers)
+- [ ] Level metadata fields readable from Rust
+
+**Files touched:**
+- `assets/maps/colony.ldtk` — nest variants, surface variants
 - `src/plugins/ldtk_maps.rs` — biome tile bundle, level metadata reading
-- [src/components/terrain.rs](cci:7://file:///Users/mfreshour/src/ant-col-test-split-nest-ai/src/components/terrain.rs:0:0-0:0) — `BiomeTile` bundle
+- `src/components/terrain.rs` — `BiomeTile` bundle
+
+**Risks:**
+- Biome gameplay effects need to integrate with pheromone evaporation, ant speed, and environment systems — may require touching more files than listed.
+
+---
+
+## Sprint L6: Campaign Prep & Documentation
+
+### Goal
+Establish the asset pipeline for Sprint 21 (Campaign Mode) by creating the campaign LDtk project with 16+ patch levels. Document the LDtk editing workflow so designers can create new levels.
+
+### Tasks
+
+| # | Task | Est |
+|---|---|---|
+| L6.1 | Create `assets/maps/campaign.ldtk` — separate LDtk project for campaign with 16+ patch levels. Or extend `colony.ldtk` with a world layout using LDtk's multi-world feature | 4h |
+| L6.2 | Populate campaign levels: place food sources, portals, enemy nests, and hazards across all 16+ patches with varied difficulty | 5h |
+| L6.3 | Wire campaign levels to MapRegistry: dynamic level discovery from LDtk project (deferred from L2/L3 open items) | 4h |
+| L6.4 | Make nest dimensions dynamic from LDtk metadata (deferred from L2 open items) | 3h |
+| L6.5 | Document LDtk editing workflow: how to add a new level, required layers, entity placement rules, tileset conventions. Add to `docs/LDTK_MAP_EDITING.md` | 3h |
+| L6.6 | Build check + runtime validation — campaign project loads, dynamic discovery works | 2h |
+
+### Demo
+> Switch to campaign project — 16 yard patches visible in LDtk's world view, each with different biomes and food layouts. Adding a new level in LDtk automatically appears in the map cycle. Documentation covers the full editing workflow. All ready for Sprint 21 campaign integration.
+
+### Acceptance Criteria
+- [ ] Campaign LDtk project with 16+ levels exists
+- [ ] Dynamic level discovery from LDtk project works (MapRegistry not statically built)
+- [ ] Nest dimensions read from LDtk level metadata (not constants)
+- [ ] `LDTK_MAP_EDITING.md` documents the workflow
+- [ ] Adding a new level in LDtk automatically appears in the map cycle
+
+**Files touched:**
+- `assets/maps/campaign.ldtk` (new) — campaign patch levels
+- `src/plugins/ldtk_maps.rs` — dynamic level discovery, MapRegistry builder
+- `src/resources/nest.rs` — dynamic dimensions from LDtk metadata
+- `src/resources/active_map.rs` — dynamic MapRegistry
 - `docs/LDTK_MAP_EDITING.md` (new)
 
 ---
@@ -253,34 +316,37 @@ Replace placeholder solid-color tilesets with proper pixel art. Create multiple 
 | **L1** | Foundation + Surface | ~27h |
 | **L2** | Nest IntGrid Pipeline | ~42h |
 | **L3** | Entities + Portals | ~37h |
-| **L4** | Tilesets + Campaign Prep | ~50h |
-| **Total** | | **~156h** |
+| **L4** | Tilesets & Auto-Rules | ~24h |
+| **L5** | Layout Variants & Biomes | ~21h |
+| **L6** | Campaign Prep & Docs | ~21h |
+| **Total** | | **~172h** |
 
 ## Integration with Existing Roadmap
 
 ```
 Sprints 12-18 (ant unification) ──────────────────────────────────┐
                                                                    │
-Sprint L1 ──► Sprint L2 ──► Sprint L3 ──► Sprint L4 ─────────────┤
-(surface)     (nest grids)   (entities)    (tilesets +             │
-                                            campaign maps)         │
-                                                 │                 │
-Sprint 19 ✓ (environment) ──────────────────────┤                 │
-                                                 ▼                 │
-                                          Sprint 20 ◄─────────────┘
-                                        (quick game)
-                                              │
-                                              ▼
-                                        Sprint 21 (campaign) ◄── L4 campaign maps
-                                              │
-                                              ▼
-                                        Sprint 22 (polish)
+Sprint L1 ──► Sprint L2 ──► Sprint L3 ──┬── Sprint L4 (tilesets) ┤
+(surface)     (nest grids)  (entities &  ├── Sprint L5 (variants) ┤
+                             portals)    └── Sprint L6 (campaign) ┤
+                                                  │                │
+Sprint 19 ✓ (environment) ──────────────────────-┤                │
+                                                  ▼                │
+                                           Sprint 20 ◄────────────┘
+                                         (quick game)
+                                               │
+                                               ▼
+                                         Sprint 21 (campaign) ◄── L6 campaign maps
+                                               │
+                                               ▼
+                                         Sprint 22 (polish)
 ```
 
 **Key notes:**
 - **L1–L2 can run in parallel** with Sprints 12–18 (they touch different files)
 - **L3 benefits from Sprint 14** being done (portal wiring is cleaner with job-driven transitions)
-- **L4 directly feeds Sprint 21** (campaign levels are the maps campaign mode loads)
+- **L4–L6 can run in parallel** with each other — they touch different files and concerns
+- **L6 directly feeds Sprint 21** (campaign levels are the maps campaign mode loads)
 - **Sprint 20 (Quick Game)** should use LDtk maps if L1–L3 are complete by then
 - [NestGrid::default()](cci:1://file:///Users/mfreshour/src/ant-col-test-split-nest-ai/src/resources/simulation.rs:51:4-57:5) should be **kept for unit tests** even after LDtk loading replaces it at runtime
 

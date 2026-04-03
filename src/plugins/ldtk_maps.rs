@@ -44,7 +44,7 @@ impl Plugin for LdtkMapsPlugin {
             .insert_resource(LdtkSettings {
                 level_spawn_behavior: LevelSpawnBehavior::UseZeroTranslation,
                 set_clear_color: SetClearColor::No,
-                int_grid_rendering: IntGridRendering::Colorful,
+                int_grid_rendering: IntGridRendering::Invisible,
                 ..default()
             })
             .add_systems(Startup, spawn_ldtk_world)

@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_ecs_ldtk::prelude::GridCoords;
-use bevy_ecs_tilemap::tiles::TileColor;
+use bevy_ecs_tilemap::tiles::{TileColor, TileTextureIndex};
 
 use crate::components::map::{MapId, MapKind, MapMarker};
 use crate::components::nest::{Brood, CarriedBy, CellType, DigStep, FoodEntity, NestTask};
@@ -50,7 +50,7 @@ pub(super) fn apply_zone_expansions(
     mut commands: Commands,
     mut map_query: Query<(&mut NestGrid, &mut NestPathCache, &mut NestPheromoneGrid), With<MapMarker>>,
     mut query: Query<(Entity, &ExpandZone, &MapId)>,
-    mut tile_query: Query<(&GridCoords, &mut TileColor, &MapId), Without<ExpandZone>>,
+    mut tile_query: Query<(&GridCoords, &mut TileColor, &mut TileTextureIndex, &MapId), Without<ExpandZone>>,
 ) {
     use crate::resources::nest_pheromone::chamber_kind_to_label;
 
@@ -64,7 +64,8 @@ pub(super) fn apply_zone_expansions(
         let chamber = expand.chamber;
 
         if grid.get(x, y) == CellType::Tunnel {
-            grid.set(x, y, CellType::Chamber(chamber));
+            let new_cell = CellType::Chamber(chamber);
+            grid.set(x, y, new_cell);
             path_cache.invalidate();
 
             if let Some(phero) = phero_grid.get_mut(x, y) {
@@ -73,9 +74,10 @@ pub(super) fn apply_zone_expansions(
             }
 
             let target_gc = nest_to_grid_coords(x, y);
-            for (coords, mut color, tile_map_id) in &mut tile_query {
+            for (coords, mut color, mut tex_idx, tile_map_id) in &mut tile_query {
                 if tile_map_id.0 == map_id.0 && *coords == target_gc {
-                    color.0 = CellType::Chamber(chamber).color();
+                    color.0 = new_cell.color();
+                    tex_idx.0 = new_cell.tile_index();
                     break;
                 }
             }
@@ -90,7 +92,7 @@ pub(super) fn apply_excavated_cells(
     mut commands: Commands,
     mut map_query: Query<(&mut NestGrid, &mut NestPathCache), With<MapMarker>>,
     mut query: Query<(Entity, &ExcavatedCell, &MapId)>,
-    mut tile_query: Query<(&GridCoords, &mut TileColor, &MapId), Without<ExcavatedCell>>,
+    mut tile_query: Query<(&GridCoords, &mut TileColor, &mut TileTextureIndex, &MapId), Without<ExcavatedCell>>,
 ) {
     for (entity, excavated, map_id) in &mut query {
         let Ok((mut grid, mut path_cache)) = map_query.get_mut(map_id.0) else {
@@ -104,9 +106,10 @@ pub(super) fn apply_excavated_cells(
             path_cache.invalidate();
 
             let target_gc = nest_to_grid_coords(x, y);
-            for (coords, mut color, tile_map_id) in &mut tile_query {
+            for (coords, mut color, mut tex_idx, tile_map_id) in &mut tile_query {
                 if tile_map_id.0 == map_id.0 && *coords == target_gc {
                     color.0 = CellType::Tunnel.color();
+                    tex_idx.0 = CellType::Tunnel.tile_index();
                     break;
                 }
             }
@@ -268,21 +271,20 @@ pub(super) fn player_dig_zone_input(
         // Only allow marking diggable cells.
         if grid.get(gx, gy).is_diggable() {
             dig_zones.cells.insert((gx, gy));
-            // Tint the tile to show it's designated.
+            // Tint the tile to highlight the dig designation.
             for (coords, mut color, tile_map) in &mut tile_query {
                 if tile_map.0 == active.entity && *coords == target_gc {
-                    color.0 = Color::srgb(0.6, 0.45, 0.2);
+                    color.0 = Color::srgb(0.8, 0.6, 0.3);
                     break;
                 }
             }
         }
     } else if right {
         if dig_zones.cells.remove(&(gx, gy)) {
-            // Restore original color.
-            let cell = grid.get(gx, gy);
+            // Restore default tint (white = no tint, shows tileset texture as-is).
             for (coords, mut color, tile_map) in &mut tile_query {
                 if tile_map.0 == active.entity && *coords == target_gc {
-                    color.0 = cell.color();
+                    color.0 = Color::WHITE;
                     break;
                 }
             }
