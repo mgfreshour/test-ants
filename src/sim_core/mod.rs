@@ -8,6 +8,7 @@ pub mod clock;
 pub mod job_assignment;
 pub mod nest_scoring;
 pub mod nest_stimuli;
+pub mod queen_scoring;
 pub mod nest_transitions;
 pub mod regressions;
 pub mod rng;

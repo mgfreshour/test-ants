@@ -387,6 +387,7 @@ fn spawn_queens_from_ldtk(
             Visibility::Hidden,
             Queen,
             crate::components::nest::QueenHunger::default(),
+            crate::components::nest::QueenTask::Idle { timer: 0.0 },
             crate::components::ant::ColonyMember { colony_id },
             *map_id,
             crate::components::ant::Health { current: 100.0, max: 100.0 },

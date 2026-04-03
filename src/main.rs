@@ -22,6 +22,7 @@ use plugins::egui_ui::EguiUiPlugin;
 use plugins::pheromone::PheromonePlugin;
 use plugins::ant_sprites::AntSpritePlugin;
 use plugins::player::PlayerPlugin;
+use plugins::queen_ai::QueenAiPlugin;
 use plugins::steering::SteeringPlugin;
 use ui::hud::HudPlugin;
 
@@ -47,6 +48,7 @@ fn main() {
             NestAiPlugin,
             NestPheromonePlugin,
             NestNavigationPlugin,
+            QueenAiPlugin,
         ))
         .add_plugins((
             PheromonePlugin,

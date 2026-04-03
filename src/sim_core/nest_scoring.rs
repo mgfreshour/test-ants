@@ -21,7 +21,6 @@ mod tests {
             satiation: 0.25,
             decay_rate: 0.005,
             starvation_timer: 50.0,
-            egg_timer: 0.0,
         };
         if hunger.satiation > 0.0 {
             hunger.starvation_timer = 0.0;

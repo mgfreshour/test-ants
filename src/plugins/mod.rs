@@ -13,4 +13,5 @@ pub mod nest_pheromone;
 pub mod pheromone;
 pub mod ant_sprites;
 pub mod player;
+pub mod queen_ai;
 pub mod steering;

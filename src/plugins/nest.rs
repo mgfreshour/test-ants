@@ -3,7 +3,7 @@ use rand::Rng;
 
 use crate::components::ant::{Ant, AntJob, AntState, Caste, ColonyMember, Health, Movement, PositionHistory, StimulusThresholds, SteeringTarget, SteeringWeights, TrailSense};
 use crate::components::map::{MapId, MapKind, MapMarker};
-use crate::components::nest::{Brood, BroodStage, CellType, ChamberKind, NestTask, Queen, QueenHunger};
+use crate::components::nest::{Brood, BroodStage, CellType, ChamberKind, NestTask, Queen, QueenHunger, QueenTask};
 use crate::plugins::ant_ai::ColonyFood;
 use crate::plugins::camera::MainCamera;
 use crate::resources::active_map::{ActiveMap, MapRegistry, SavedCamera, SavedCameraStates};
@@ -200,14 +200,18 @@ fn sync_map_visibility(
 fn queen_hunger_decay(
     clock: Res<SimClock>,
     time: Res<Time>,
-    mut queen_query: Query<&mut QueenHunger, With<Queen>>,
+    mut queen_query: Query<(&mut QueenHunger, Option<&QueenTask>), With<Queen>>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
     }
     let dt = time.delta_secs() * clock.speed.multiplier();
-    for mut hunger in &mut queen_query {
-        hunger.satiation = (hunger.satiation - hunger.decay_rate * dt).max(0.0);
+    for (mut hunger, task) in &mut queen_query {
+        let multiplier = match task {
+            Some(QueenTask::Resting { .. }) => crate::sim_core::queen_scoring::resting_decay_multiplier(),
+            _ => 1.0,
+        };
+        hunger.satiation = (hunger.satiation - hunger.decay_rate * multiplier * dt).max(0.0);
     }
 }
 
@@ -216,7 +220,7 @@ fn queen_egg_laying(
     time: Res<Time>,
     mut commands: Commands,
     map_grid_query: Query<&NestGrid, With<MapMarker>>,
-    mut queen_query: Query<(&mut QueenHunger, &MapId), With<Queen>>,
+    mut queen_query: Query<(&mut QueenHunger, &mut QueenTask, &MapId), With<Queen>>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -224,13 +228,14 @@ fn queen_egg_laying(
     let dt = time.delta_secs() * clock.speed.multiplier();
     let mut rng = rand::thread_rng();
 
-    for (mut hunger, map_id) in &mut queen_query {
+    for (mut hunger, mut task, map_id) in &mut queen_query {
+        let QueenTask::LayingEggs { ref mut egg_timer } = *task else { continue };
         let Ok(grid) = map_grid_query.get(map_id.0) else { continue };
 
-        hunger.egg_timer += dt;
+        *egg_timer += dt;
 
-        if hunger.egg_timer >= QUEEN_EGG_INTERVAL && hunger.satiation >= EGG_SATIATION_COST {
-            hunger.egg_timer -= QUEEN_EGG_INTERVAL;
+        if *egg_timer >= QUEEN_EGG_INTERVAL && hunger.satiation >= EGG_SATIATION_COST {
+            *egg_timer -= QUEEN_EGG_INTERVAL;
             hunger.satiation -= EGG_SATIATION_COST;
 
             let queen_cells = find_chamber_cells(grid, ChamberKind::Queen);
@@ -255,6 +260,11 @@ fn queen_egg_laying(
                 Brood::new_egg(),
                 MapId(map_id.0),
             ));
+
+            // If satiation dropped below egg cost, fall back to idle for re-evaluation
+            if hunger.satiation < EGG_SATIATION_COST {
+                *task = QueenTask::Idle { timer: 0.0 };
+            }
         }
     }
 }

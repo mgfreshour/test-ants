@@ -112,8 +112,6 @@ pub struct QueenHunger {
     pub decay_rate: f32,
     /// Time spent at 0 satiation; used to trigger starvation damage after a grace period.
     pub starvation_timer: f32,
-    /// Per-queen egg-laying timer (replaces the former Local<f32>).
-    pub egg_timer: f32,
 }
 
 impl Default for QueenHunger {
@@ -122,9 +120,21 @@ impl Default for QueenHunger {
             satiation: 1.0,       // start full so first eggs can happen immediately
             decay_rate: 0.005,    // ~200 seconds to go from 1.0 to 0.0
             starvation_timer: 0.0,
-            egg_timer: 0.0,
         }
     }
+}
+
+/// Queen behavioral state machine. Driven by utility scoring in queen_ai plugin.
+#[derive(Component, Debug, Clone)]
+pub enum QueenTask {
+    /// Waiting to be assigned a task; timer tracks time since last evaluation.
+    Idle { timer: f32 },
+    /// Actively laying eggs at regular intervals.
+    LayingEggs { egg_timer: f32 },
+    /// Conserving energy — hunger decays at half rate.
+    Resting { timer: f32 },
+    /// Self-grooming — default moderate-priority activity.
+    Grooming { timer: f32 },
 }
 
 /// Marks a brood entity as being physically carried by an ant.
