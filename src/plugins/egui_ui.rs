@@ -5,7 +5,7 @@ use rand::Rng;
 
 use crate::components::ant::{Ant, AntState, CarriedItem, ColonyMember, Health, PlayerControlled, TrailSense};
 use crate::components::map::{MapKind, MapMarker};
-use crate::components::nest::{NestTask, Queen, QueenHunger};
+use crate::components::nest::{NestTask, Queen, QueenHunger, QueenTask};
 use crate::components::terrain::FoodSource;
 use crate::plugins::ant_ai::ColonyFood;
 use crate::plugins::combat::{GameResult, Spider};
@@ -109,6 +109,7 @@ fn colony_management_panel(
     food_query: Query<&ColonyFood, With<MapMarker>>,
     mut sliders_query: Query<&mut BehaviorSliders, With<MapMarker>>,
     ant_query: Query<(&Ant, &ColonyMember, Option<&TrailSense>, Option<&NestTask>)>,
+    queen_task_query: Query<(&QueenTask, &ColonyMember), With<Queen>>,
 ) {
     if !panel_visible.0 {
         return;
@@ -436,6 +437,32 @@ fn colony_management_panel(
                             ui.horizontal(|ui| {
                                 ui.colored_label(color, letter);
                                 ui.label(format!("{} ({})", desc, count));
+                            });
+                        }
+                    });
+
+                    // Queen state legend — show current queen task
+                    ui.collapsing("Queen State", |ui| {
+                        let queen_label = queen_task_query.iter()
+                            .find(|(_, c)| c.colony_id == 0)
+                            .map(|(qt, _)| qt);
+
+                        let entries: &[(&str, egui::Color32, &str)] = &[
+                            ("I", egui::Color32::from_rgba_premultiplied(255, 255, 255, 128), "Idle"),
+                            ("E", egui::Color32::from_rgb(242, 217, 102), "Laying Eggs"),
+                            ("R", egui::Color32::from_rgb(102, 153, 255), "Resting"),
+                            ("G", egui::Color32::from_rgb(179, 230, 179), "Grooming"),
+                        ];
+
+                        for &(letter, color, desc) in entries {
+                            let is_active = queen_label.map_or(false, |qt| qt.label() == letter);
+                            ui.horizontal(|ui| {
+                                ui.colored_label(color, letter);
+                                if is_active {
+                                    ui.strong(desc);
+                                } else {
+                                    ui.label(desc);
+                                }
                             });
                         }
                     });
