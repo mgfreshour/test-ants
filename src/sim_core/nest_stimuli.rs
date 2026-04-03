@@ -336,18 +336,19 @@ mod tests {
     #[test]
     fn nurse_attends_moderately_hungry_queen_nearby() {
         // Regression: queen was starving because diffused signal didn't
-        // clear nurse thresholds. A nurse 2-3 cells from a half-hungry
-        // queen (signal ~0.25 after diffusion) must respond.
+        // clear nurse thresholds. With area scanning (SCAN_RADIUS=4),
+        // a nurse reads the best queen_signal within 4 cells. At ~2 cells
+        // from queen, the best cell might be 1 cell closer with ~70% signal.
         use crate::sim_core::queen_scoring::queen_hunger_signal;
         let hunger_frac = 0.5; // half hungry
         let emitted = queen_hunger_signal(hunger_frac, 1.0);
-        // After ~2 cells of diffusion, signal roughly halves
-        let diffused = emitted * 0.45;
-        let stimulus = queen_stimulus_from_signal(diffused);
+        // With area scan, ant reads signal ~1 cell from queen (~70% retained)
+        let best_nearby = emitted * 0.70;
+        let stimulus = queen_stimulus_from_signal(best_nearby);
         let nurse_threshold = default_thresholds(AntJob::Nurse).attend_queen;
         assert!(
             stimulus > nurse_threshold,
-            "stimulus {stimulus} from diffused signal {diffused} (emitted {emitted}) \
+            "stimulus {stimulus} from scanned signal {best_nearby} (emitted {emitted}) \
              must exceed nurse threshold {nurse_threshold}"
         );
     }
@@ -356,21 +357,24 @@ mod tests {
     fn queen_stimulus_margin_beats_move_brood_nearby() {
         // Regression: wandering ants prioritised moving eggs over feeding
         // a starving queen because brood_stimulus_strength gave high
-        // margins. Queen stimulus margin must win at comparable distances.
+        // margins. With area scanning, the ant reads queen_signal from the
+        // strongest cell within SCAN_RADIUS, not just its own cell.
         use crate::sim_core::queen_scoring::queen_hunger_signal;
         let nurse = default_thresholds(AntJob::Nurse);
 
-        // Hungry queen, worker ~2 cells away
+        // Hungry queen, worker ~3 cells away. Area scan reads best signal
+        // within radius — at worst 1 cell from queen (~70% of emitted).
         let emitted = queen_hunger_signal(0.7, 1.0);
-        let diffused = emitted * 0.45;
-        let queen_margin = queen_stimulus_from_signal(diffused) - nurse.attend_queen;
+        let best_nearby = emitted * 0.70;
+        let queen_margin = queen_stimulus_from_signal(best_nearby) - nurse.attend_queen;
 
-        // Unrelocated brood at dist 2
-        let brood_margin = brood_stimulus_strength(2.0) - nurse.move_brood;
+        // Unrelocated brood right next to the ant (worst case for queen)
+        let brood_margin = brood_stimulus_strength(1.0) - nurse.move_brood;
 
         assert!(
             queen_margin > brood_margin,
-            "queen margin {queen_margin} must beat brood margin {brood_margin}"
+            "queen margin {queen_margin} must beat brood margin {brood_margin} \
+             even against adjacent brood"
         );
     }
 }

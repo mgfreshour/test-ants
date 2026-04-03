@@ -137,6 +137,26 @@ pub enum QueenTask {
     Grooming { timer: f32 },
 }
 
+impl QueenTask {
+    pub fn label(&self) -> &'static str {
+        match self {
+            QueenTask::Idle { .. } => "I",
+            QueenTask::LayingEggs { .. } => "E",
+            QueenTask::Resting { .. } => "R",
+            QueenTask::Grooming { .. } => "G",
+        }
+    }
+
+    pub fn color(&self) -> Color {
+        match self {
+            QueenTask::Idle { .. } => Color::srgba(1.0, 1.0, 1.0, 0.5),
+            QueenTask::LayingEggs { .. } => Color::srgb(0.95, 0.85, 0.4),
+            QueenTask::Resting { .. } => Color::srgb(0.4, 0.6, 1.0),
+            QueenTask::Grooming { .. } => Color::srgb(0.7, 0.9, 0.7),
+        }
+    }
+}
+
 /// Marks a brood entity as being physically carried by an ant.
 #[derive(Component)]
 pub struct CarriedBy(pub Entity);

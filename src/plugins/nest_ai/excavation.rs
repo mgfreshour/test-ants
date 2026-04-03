@@ -3,7 +3,7 @@ use bevy_ecs_ldtk::prelude::GridCoords;
 use bevy_ecs_tilemap::tiles::{TileColor, TileTextureIndex};
 
 use crate::components::map::{MapId, MapKind, MapMarker};
-use crate::components::nest::{Brood, CarriedBy, CellType, DigStep, FoodEntity, NestTask};
+use crate::components::nest::{Brood, CarriedBy, CellType, DigStep, FoodEntity, NestTask, Queen, QueenTask};
 use crate::plugins::nest_navigation::world_to_nest_grid;
 use crate::resources::active_map::ActiveMap;
 use crate::resources::nest::{NestGrid, PlayerDigZones, NEST_HEIGHT};
@@ -297,6 +297,7 @@ pub(super) fn nest_task_labels(
     active: Res<ActiveMap>,
     mut commands: Commands,
     ant_query: Query<(Entity, &NestTask, &MapId, Option<&Children>)>,
+    queen_query: Query<(Entity, &QueenTask, &MapId), With<Queen>>,
     existing_labels: Query<Entity, With<NestTaskLabel>>,
 ) {
     // Clean up old labels.
@@ -326,6 +327,29 @@ pub(super) fn nest_task_labels(
                 },
                 TextColor(color),
                 Transform::from_xyz(0.0, 6.0, 0.1),
+                NestTaskLabel,
+                MapId(map_id.0),
+            ))
+            .id();
+
+        commands.entity(entity).add_child(label_entity);
+    }
+
+    // Queen task label
+    for (entity, queen_task, map_id) in &queen_query {
+        if map_id.0 != active.entity {
+            continue;
+        }
+
+        let label_entity = commands
+            .spawn((
+                Text2d::new(queen_task.label()),
+                TextFont {
+                    font_size: 9.0,
+                    ..default()
+                },
+                TextColor(queen_task.color()),
+                Transform::from_xyz(0.0, 8.0, 0.1),
                 NestTaskLabel,
                 MapId(map_id.0),
             ))

@@ -113,11 +113,28 @@ pub(super) fn stimulus_scan(
             if s > best_strength[2].1 { best_strength[2].1 = s; }
         }
 
-        // ── Hungry queen (pure pheromone — hunger encoded in diffused signal) ──
-        {
-            let queen_signal = phero_grid.get(ant_gp.0, ant_gp.1).queen_signal;
-            if queen_signal > 0.0 && colony_food.stored > 0.5 {
-                let s = nest_stimuli::queen_stimulus_from_signal(queen_signal);
+        // ── Hungry queen (scan best queen_signal within radius) ──
+        // Like other stimuli, the ant senses the strongest signal in its
+        // scan area rather than only at its own cell. This prevents
+        // diffusion attenuation from making queen stimulus uncompetitive
+        // with proximity-based stimuli like move-brood.
+        if colony_food.stored > 0.5 {
+            let mut best_qs: f32 = 0.0;
+            for dy in -SCAN_RADIUS..=SCAN_RADIUS {
+                for dx in -SCAN_RADIUS..=SCAN_RADIUS {
+                    let nx = ax + dx;
+                    let ny = ay + dy;
+                    if nx < 0 || ny < 0 || nx as usize >= grid.width || ny as usize >= grid.height {
+                        continue;
+                    }
+                    let qs = phero_grid.get(nx as usize, ny as usize).queen_signal;
+                    if qs > best_qs {
+                        best_qs = qs;
+                    }
+                }
+            }
+            if best_qs > 0.0 {
+                let s = nest_stimuli::queen_stimulus_from_signal(best_qs);
                 best_strength[3].1 = s;
             }
         }
