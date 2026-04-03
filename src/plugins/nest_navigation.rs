@@ -1,11 +1,11 @@
 use bevy::prelude::*;
 
 use crate::components::ant::SteeringTarget;
-use crate::components::map::{MapId, MapKind, MapMarker};
+use crate::components::map::{MapId, MapMarker};
 use crate::components::nest::{NestPath, NestTask};
 use crate::resources::active_map::viewing_nest;
 use crate::resources::nest::{NestGrid, NEST_CELL_SIZE, NEST_HEIGHT, NEST_WIDTH};
-use crate::resources::nest_pathfinding::{GridPos, NestPathCache};
+use crate::resources::nest_pathfinding::GridPos;
 use crate::resources::simulation::{SimClock, SimSpeed};
 
 pub struct NestNavigationPlugin;

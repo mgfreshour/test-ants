@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use rand::Rng;
 
 use crate::components::ant::{
-    Ant, AntState, CarriedItem, ColonyMember, Health, Movement, PlayerControlled,
+    Ant, AntState, CarriedItem, ColonyMember, Movement, PlayerControlled,
 };
 use crate::components::map::{MapId, MapKind, MapMarker, MapPortal, PORTAL_RANGE};
 use crate::components::nest::{NestPath, NestTask};

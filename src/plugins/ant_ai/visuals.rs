@@ -36,8 +36,6 @@ pub fn update_state_labels(
             AntState::Following => (">", Color::srgb(0.5, 0.8, 1.0)),
             AntState::Attacking => ("!", Color::srgb(1.0, 0.35, 0.2)),
             AntState::Idle => ("I", Color::srgba(1.0, 1.0, 1.0, 0.5)),
-            AntState::Nursing => ("N", Color::srgb(0.8, 0.6, 1.0)),
-            AntState::Digging => ("G", Color::srgb(0.7, 0.5, 0.3)),
             AntState::Fleeing => ("X", Color::srgb(1.0, 1.0, 0.2)),
             AntState::Foraging => match sense {
                 TrailSense::FollowingFood => ("f", Color::srgb(1.0, 0.6, 0.1)),

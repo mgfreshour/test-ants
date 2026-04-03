@@ -70,9 +70,11 @@ impl Default for AggressionSettings {
 
 #[derive(Resource, Default)]
 pub struct ColonyStats {
-    pub workers: u32,
-    pub soldiers: u32,
-    pub drones: u32,
+    pub foragers: u32,
+    pub nurses: u32,
+    pub diggers: u32,
+    pub defenders: u32,
+    pub unassigned: u32,
     pub eggs: u32,
     pub larvae: u32,
     pub pupae: u32,

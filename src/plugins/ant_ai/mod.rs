@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use rand::Rng;
-use crate::components::ant::{Ant, AntJob, AntState, CarriedItem, ColonyMember, Health, Movement, PlayerControlled, PositionHistory, SteeringTarget, SteeringWeights, TrailSense};
+use crate::components::ant::{Ant, AntState, CarriedItem, ColonyMember, Movement, PlayerControlled, PositionHistory};
 use crate::components::terrain::FoodSource;
 use crate::resources::active_map::MapRegistry;
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
@@ -30,7 +30,6 @@ pub struct ColonyFood {
 impl Plugin for AntAiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SpatialGrid>()
-            .add_systems(Startup, spawn_initial_ants)
             .add_systems(
                 Update,
                 (
@@ -61,35 +60,6 @@ impl Plugin for AntAiPlugin {
                     ).chain(),
                 ).chain(),
             );
-    }
-}
-
-fn spawn_initial_ants(mut commands: Commands, config: Res<SimConfig>, registry: Res<MapRegistry>) {
-    let mut rng = rand::thread_rng();
-    let nest = config.nest_position;
-
-    for _ in 0..config.initial_ant_count {
-        let offset_x = rng.gen_range(-20.0..20.0);
-        let offset_y = rng.gen_range(-20.0..20.0);
-
-        commands.spawn((
-            Sprite {
-                color: Color::srgb(0.1, 0.1, 0.1),
-                custom_size: Some(Vec2::splat(4.0)),
-                ..default()
-            },
-            Transform::from_xyz(nest.x + offset_x, nest.y + offset_y, 2.0),
-            Ant::new_worker(),
-            AntJob::Unassigned,
-            Movement::with_random_direction(config.ant_speed_worker, &mut rng),
-            Health::worker(),
-            ColonyMember { colony_id: 0 },
-            PositionHistory::default(),
-            TrailSense::default(),
-            MapId(registry.surface),
-            SteeringTarget::default(),
-            SteeringWeights::default(),
-        ));
     }
 }
 

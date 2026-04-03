@@ -13,8 +13,6 @@ pub enum AntState {
     Idle,
     Foraging,
     Returning,
-    Nursing,
-    Digging,
     Defending,
     Fighting,
     Fleeing,

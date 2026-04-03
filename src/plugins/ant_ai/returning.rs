@@ -6,7 +6,6 @@ use crate::resources::active_map::MapRegistry;
 use crate::resources::pheromone::ColonyPheromones;
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 use crate::components::pheromone::PheromoneType;
-use crate::sim_core::ant_logic;
 
 const ANTI_BACKTRACK_WEIGHT: f32 = 0.35;
 const FORWARD_WEIGHT: f32 = 0.6;

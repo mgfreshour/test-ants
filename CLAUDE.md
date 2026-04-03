@@ -15,19 +15,37 @@
 - `src/resources/simulation.rs`: Core simulation configuration and clock state.
 - `src/resources/active_map.rs`: Active map state and map view helpers.
 
-### Surface Ant AI and Colony Loop
-- `src/plugins/ant_ai.rs`: Surface ant spawning, foraging/returning behavior, hunger/starvation, pickup/dropoff flow, ant visuals.
-- `src/components/ant.rs`: Ant state, movement, caste/follower/player-control related components.
+### Ant AI (Unified Job-Based System)
+- `src/plugins/ant_ai/mod.rs`: Plugin registration, initial surface ant spawning, spatial grid, food pickup/deposit, pheromone deposit, movement, boundary bounce.
+- `src/plugins/ant_ai/foraging.rs`: Forager steering (pheromone gradient following, food beelining).
+- `src/plugins/ant_ai/returning.rs`: Return-to-nest steering (home pheromone following).
+- `src/plugins/ant_ai/recruiting.rs`: Follower/attack recruit steering, nest recruit following.
+- `src/plugins/ant_ai/defending.rs`: Defender patrol steering near nest entrance.
+- `src/plugins/ant_ai/hunger.rs`: Unified hunger tick and feeding (surface + nest).
+- `src/plugins/ant_ai/visuals.rs`: Ant sprite colors and state labels.
+- `src/components/ant.rs`: AntState, AntJob, Movement, SteeringTarget, SteeringWeights, StimulusThresholds, and other ant components.
 - `src/resources/spatial_grid.rs`: Spatial indexing used by ant systems.
 - `src/components/terrain.rs`: Food source data components.
 
+### Steering System
+- `src/plugins/steering.rs`: Unified `apply_steering` system reads SteeringTarget and produces Movement direction.
+- `src/sim_core/steering.rs`: Pure steering math (direction blending, waypoint following, separation force).
+
 ### Nest, Maps, and Underground Systems
-- `src/plugins/nest.rs`: Surface/nest map setup, portals, queen spawn, brood lifecycle, colony stats updates, map visibility.
-- `src/plugins/nest_ai.rs`: Underground worker utility AI (nursing/digging/hauling/queen care), task execution, excavation, player dig designations.
-- `src/plugins/nest_navigation.rs`: Nest path following, grid/world conversion, collision correction, debug path overlay.
+- `src/plugins/nest.rs`: Surface/nest map setup, portals, queen spawn, brood lifecycle, colony stats (by AntJob), map visibility.
+- `src/plugins/nest_ai/core.rs`: Underground stimulus-driven task AI, portal transitions, job assignment, task execution (feed/move-brood/haul/attend-queen/dig/wander), excavation, separation steering, player dig zones.
+- `src/plugins/nest_navigation.rs`: Nest path following, grid/world conversion, collision correction, SteeringTarget conversion, debug path overlay.
 - `src/resources/nest.rs`: Nest grid model, constants, dig/stack support resources.
 - `src/resources/nest_pathfinding.rs`: Path cache and pathfinding helpers.
 - `src/components/nest.rs`: Queen/brood/task/path/stacked-item related components.
+
+### Simulation Core (Pure Logic)
+- `src/sim_core/ant_logic.rs`: Pure surface ant decision logic (pickup, deposit, pheromone, combat, hunger).
+- `src/sim_core/job_assignment.rs`: Job ratio computation, age-based affinity, hysteresis reassignment.
+- `src/sim_core/nest_scoring.rs`: Job-based task eligibility scoring.
+- `src/sim_core/nest_stimuli.rs`: Stimulus strength computation, threshold-based task pickup.
+- `src/sim_core/nest_transitions.rs`: Task step state machine transitions, humidity scaling.
+- `src/sim_core/regressions.rs`: Portal entry logic, orphaned returner reset, dig face selection.
 
 ### Pheromone Systems
 - `src/plugins/pheromone.rs`: Surface pheromone simulation and overlay (`H` toggle).
@@ -40,11 +58,11 @@
 - `src/plugins/player.rs`: Player ant control, follower recruitment/dismissal, manual pheromone trail, ant swapping, camera follow.
 - `src/plugins/camera.rs`: Free camera pan/zoom/clamp behavior on surface.
 - `src/plugins/combat.rs`: Enemy colony + spider, combat state transitions, damage/death, victory/defeat checks.
-- `src/resources/colony.rs`: Colony-level stats/sliders/caste-ratio resources used by UI and nest logic.
+- `src/resources/colony.rs`: ColonyStats (by AntJob), BehaviorSliders, CasteRatios, AggressionSettings.
 
 ### UI and UX
-- `src/ui/hud.rs`: Main HUD text (mode, stats, controls, overlay, FPS).
-- `src/ui/colony_panel.rs`: Colony behavior slider display and keyboard controls.
+- `src/plugins/egui_ui.rs`: Colony management panel (job distribution sliders, stats by AntJob), player HUD, minimap, sim controls, shortcut overlay.
+- `src/ui/hud.rs`: FrameTimeDiagnosticsPlugin registration (HUD rendering moved to egui_ui).
 - `src/components/map.rs`: Map identity, map kinds, portal definitions.
 
 ### Project Notes

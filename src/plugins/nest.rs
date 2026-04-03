@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::ant::{Ant, AntJob, Caste, ColonyMember, Health, Movement, PositionHistory, TrailSense};
+use crate::components::ant::{Ant, AntJob, AntState, Caste, ColonyMember, Health, Movement, PositionHistory, StimulusThresholds, SteeringTarget, SteeringWeights};
 use crate::components::map::{MapId, MapKind, MapMarker, spawn_portal_pair};
-use crate::components::nest::{Brood, BroodStage, CellType, ChamberKind, NestTile, Queen, QueenHunger};
+use crate::components::nest::{Brood, BroodStage, CellType, ChamberKind, NestTask, NestTile, Queen, QueenHunger};
 use crate::plugins::ant_ai::ColonyFood;
 use crate::plugins::camera::MainCamera;
 use crate::resources::active_map::{ActiveMap, MapRegistry, SavedCamera, SavedCameraStates};
@@ -369,14 +369,11 @@ fn queen_starvation_damage(
 fn brood_development(
     clock: Res<SimClock>,
     time: Res<Time>,
-    config: Res<SimConfig>,
     caste_ratios: Res<CasteRatios>,
-    registry: Res<MapRegistry>,
     mut commands: Commands,
     mut stack_query: Query<&mut crate::resources::nest::TileStackRegistry, With<MapMarker>>,
     map_kind_query: Query<&MapKind, With<MapMarker>>,
-    portal_query: Query<&crate::components::map::MapPortal>,
-    mut brood_query: Query<(Entity, &mut Brood, &mut Sprite, &MapId, Option<&crate::components::nest::StackedItem>)>,
+    mut brood_query: Query<(Entity, &mut Brood, &mut Sprite, &Transform, &MapId, Option<&crate::components::nest::StackedItem>)>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -385,7 +382,7 @@ fn brood_development(
     let dt = time.delta_secs() * clock.speed.multiplier();
     let mut rng = rand::thread_rng();
 
-    for (entity, mut brood, mut sprite, map_id, stacked_opt) in &mut brood_query {
+    for (entity, mut brood, mut sprite, transform, map_id, stacked_opt) in &mut brood_query {
         brood.timer += dt;
 
         if brood.timer >= brood.stage_duration() {
@@ -408,6 +405,9 @@ fn brood_development(
                             stack_reg.remove(stacked.grid_pos, entity);
                         }
                     }
+
+                    // Hatch at pupa's current position on the nest map.
+                    let hatch_pos = transform.translation;
                     commands.entity(entity).despawn();
 
                     // Derive colony_id from the nest's MapKind
@@ -415,54 +415,45 @@ fn brood_development(
                         .and_then(|k| if let MapKind::Nest { colony_id } = k { Some(*colony_id) } else { None })
                         .unwrap_or(0);
 
-                    // Find the surface exit position via portal
-                    let hatch_pos = portal_query.iter()
-                        .find(|p| p.map == map_id.0 && p.target_map == registry.surface)
-                        .map(|p| p.target_position)
-                        .unwrap_or(config.nest_position);
-
                     let caste = caste_ratios.pick_caste(rng.gen::<f32>());
                     let is_red = colony_id != 0;
-                    let (speed, health, state, color) = match caste {
+                    let (health, color) = match caste {
                         Caste::Worker => (
-                            config.ant_speed_worker,
                             Health::worker(),
-                            crate::components::ant::AntState::Foraging,
-                            if is_red { Color::srgb(0.7, 0.15, 0.1) } else { Color::srgb(0.1, 0.1, 0.1) },
+                            if is_red { Color::srgb(0.55, 0.18, 0.12) } else { Color::srgb(0.35, 0.25, 0.15) },
                         ),
                         Caste::Soldier => (
-                            config.ant_speed_soldier,
                             Health::soldier(),
-                            crate::components::ant::AntState::Defending,
-                            if is_red { Color::srgb(0.8, 0.2, 0.15) } else { Color::srgb(0.3, 0.1, 0.1) },
+                            if is_red { Color::srgb(0.65, 0.2, 0.15) } else { Color::srgb(0.4, 0.2, 0.15) },
                         ),
                         _ => (
-                            config.ant_speed_worker,
                             Health::worker(),
-                            crate::components::ant::AntState::Foraging,
-                            if is_red { Color::srgb(0.7, 0.15, 0.1) } else { Color::srgb(0.1, 0.1, 0.1) },
+                            if is_red { Color::srgb(0.55, 0.18, 0.12) } else { Color::srgb(0.35, 0.25, 0.15) },
                         ),
                     };
 
-                    let offset_x = rng.gen_range(-15.0..15.0);
-                    let offset_y = rng.gen_range(-15.0..15.0);
+                    let jitter_x = rng.gen_range(-3.0..3.0);
+                    let jitter_y = rng.gen_range(-3.0..3.0);
 
                     commands.spawn((
                         Sprite {
                             color,
-                            custom_size: Some(Vec2::splat(4.0)),
+                            custom_size: Some(Vec2::splat(5.0)),
                             ..default()
                         },
-                        Transform::from_xyz(hatch_pos.x + offset_x, hatch_pos.y + offset_y, 2.0),
+                        Transform::from_xyz(hatch_pos.x + jitter_x, hatch_pos.y + jitter_y, 2.5),
                         Visibility::Hidden,
-                        Ant { caste, state, age: 0.0, hunger: 0.0 },
+                        Ant { caste, state: AntState::Idle, age: 0.0, hunger: 0.0 },
                         AntJob::Unassigned,
-                        Movement::with_random_direction(speed, &mut rng),
+                        StimulusThresholds::from_job(AntJob::Unassigned),
                         health,
                         ColonyMember { colony_id },
+                        MapId(map_id.0),
+                        NestTask::Wander { scan_timer: 0.0, wander_time: 0.0 },
+                        Movement { speed: 20.0, direction: Vec2::ZERO },
                         PositionHistory::default(),
-                        TrailSense::default(),
-                        MapId(registry.surface),
+                        SteeringTarget::default(),
+                        SteeringWeights::default(),
                     ));
                 }
             }
@@ -473,23 +464,26 @@ fn brood_development(
 fn update_colony_stats(
     mut stats: ResMut<ColonyStats>,
     registry: Res<MapRegistry>,
-    ant_query: Query<(&Ant, &ColonyMember)>,
+    ant_query: Query<(&AntJob, &ColonyMember)>,
     brood_query: Query<(&Brood, &MapId)>,
 ) {
-    stats.workers = 0;
-    stats.soldiers = 0;
-    stats.drones = 0;
+    stats.foragers = 0;
+    stats.nurses = 0;
+    stats.diggers = 0;
+    stats.defenders = 0;
+    stats.unassigned = 0;
     stats.eggs = 0;
     stats.larvae = 0;
     stats.pupae = 0;
 
-    for (ant, colony) in &ant_query {
+    for (job, colony) in &ant_query {
         if colony.colony_id != 0 { continue; }
-        match ant.caste {
-            Caste::Worker => stats.workers += 1,
-            Caste::Soldier => stats.soldiers += 1,
-            Caste::Drone => stats.drones += 1,
-            _ => {}
+        match job {
+            AntJob::Forager => stats.foragers += 1,
+            AntJob::Nurse => stats.nurses += 1,
+            AntJob::Digger => stats.diggers += 1,
+            AntJob::Defender => stats.defenders += 1,
+            AntJob::Unassigned => stats.unassigned += 1,
         }
     }
 

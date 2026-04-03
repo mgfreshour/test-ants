@@ -9,7 +9,6 @@ use crate::resources::nest_pheromone::NestPheromoneGrid;
 use crate::resources::pheromone::ColonyPheromones;
 use crate::resources::simulation::{SimClock, SimSpeed};
 use crate::components::pheromone::PheromoneType;
-use crate::sim_core::ant_logic;
 
 const FORWARD_WEIGHT: f32 = 0.6;
 const PHERO_SENSE_RADIUS: i32 = 4;

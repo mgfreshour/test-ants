@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use rand::Rng;
 use crate::components::ant::{Ant, AntJob, AntState, CarriedItem, ColonyMember, Movement, PlayerControlled, PositionHistory, SteeringTarget, SteeringWeights, TrailSense};
 use crate::components::terrain::FoodSource;
-use crate::resources::pheromone::{ColonyPheromones, PheromoneConfig};
+use crate::resources::pheromone::ColonyPheromones;
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 use crate::components::pheromone::PheromoneType;
 use crate::sim_core::ant_logic;

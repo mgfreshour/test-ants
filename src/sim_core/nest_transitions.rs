@@ -1,4 +1,4 @@
-use crate::components::nest::{AttendStep, DigStep, FeedStep, HaulStep, MoveBroodStep, NestTask};
+use crate::components::nest::{AttendStep, DigStep, FeedStep, HaulStep, MoveBroodStep};
 
 pub fn at_destination(path_done: bool, has_no_path: bool) -> bool {
     path_done || has_no_path
@@ -64,6 +64,7 @@ pub fn humidity_scaled_deposit(base_deposit: f32, humidity: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::components::nest::NestTask;
 
     #[test]
     fn feed_step_progresses_on_completed_path() {

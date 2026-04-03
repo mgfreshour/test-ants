@@ -154,16 +154,20 @@ fn colony_management_panel(
 
             // -- Colony Stats
             ui.collapsing("Stats", |ui| {
-                let pop = stats.workers + stats.soldiers + stats.drones;
+                let pop = stats.foragers + stats.nurses + stats.diggers + stats.defenders + stats.unassigned;
                 let brood = stats.eggs + stats.larvae + stats.pupae;
                 let food_stored = food_query.get(registry.player_nest).map_or(0.0, |f| f.stored);
                 let underground = ant_query.iter().filter(|(_, c, _, task)| c.colony_id == 0 && task.is_some()).count();
                 let surface = ant_query.iter().filter(|(_, c, _, _)| c.colony_id == 0).count().saturating_sub(underground);
 
                 ui.label(format!("Population: {}", pop));
-                ui.label(format!("  Workers: {}", stats.workers));
-                ui.label(format!("  Soldiers: {}", stats.soldiers));
-                ui.label(format!("  Drones: {}", stats.drones));
+                ui.label(format!("  Foragers: {}", stats.foragers));
+                ui.label(format!("  Nurses: {}", stats.nurses));
+                ui.label(format!("  Diggers: {}", stats.diggers));
+                ui.label(format!("  Defenders: {}", stats.defenders));
+                if stats.unassigned > 0 {
+                    ui.label(format!("  Unassigned: {}", stats.unassigned));
+                }
                 ui.label(format!("Brood: {}", brood));
                 ui.label(format!("  Eggs: {}", stats.eggs));
                 ui.label(format!("  Larvae: {}", stats.larvae));
