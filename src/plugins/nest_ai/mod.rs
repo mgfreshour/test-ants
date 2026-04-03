@@ -45,6 +45,7 @@ impl Plugin for NestAiPlugin {
                 Update,
                 (
                     (
+                        transitions::tick_portal_cooldowns,
                         transitions::apply_flood_damage,
                         transitions::apply_brood_fed,
                         transitions::apply_brood_relocated,

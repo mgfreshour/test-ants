@@ -118,6 +118,21 @@ impl Default for SteeringWeights {
     }
 }
 
+/// Cooldown timer preventing an ant from using a portal again too soon.
+/// Inserted on portal transition, ticked down each frame, removed at zero.
+#[derive(Component)]
+pub struct PortalCooldown {
+    pub remaining: f32,
+}
+
+impl PortalCooldown {
+    pub const DURATION: f32 = 3.0;
+
+    pub fn new() -> Self {
+        Self { remaining: Self::DURATION }
+    }
+}
+
 #[derive(Component)]
 pub struct Health {
     pub current: f32,

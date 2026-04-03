@@ -23,7 +23,7 @@
 - `src/plugins/ant_ai/defending.rs`: Defender patrol steering near nest entrance.
 - `src/plugins/ant_ai/hunger.rs`: Unified hunger tick and feeding (surface + nest).
 - `src/plugins/ant_ai/visuals.rs`: Ant sprite colors and state labels.
-- `src/components/ant.rs`: AntState, AntJob, Movement, SteeringTarget, SteeringWeights, StimulusThresholds, and other ant components.
+- `src/components/ant.rs`: AntState, AntJob, Movement, SteeringTarget, SteeringWeights, StimulusThresholds, PortalCooldown, and other ant components.
 - `src/resources/spatial_grid.rs`: Spatial indexing used by ant systems.
 - `src/components/terrain.rs`: Food source data components.
 
@@ -33,7 +33,11 @@
 
 ### Nest, Maps, and Underground Systems
 - `src/plugins/nest.rs`: Surface/nest map setup, portals, queen spawn, brood lifecycle, colony stats (by AntJob), map visibility.
-- `src/plugins/nest_ai/core.rs`: Underground stimulus-driven task AI, portal transitions, job assignment, task execution (feed/move-brood/haul/attend-queen/dig/wander), excavation, separation steering, player dig zones.
+- `src/plugins/nest_ai/mod.rs`: Plugin registration, shared marker components, helpers, initial nest ant spawning, job assignment system.
+- `src/plugins/nest_ai/transitions.rs`: Portal transitions (surface↔nest), nest-to-surface exit, portal cooldown tick, flood damage, deferred state application.
+- `src/plugins/nest_ai/stimulus.rs`: Stimulus-driven task pickup for wandering nest ants.
+- `src/plugins/nest_ai/tasks.rs`: Task execution systems (feed/move-brood/haul/attend-queen/dig/wander).
+- `src/plugins/nest_ai/excavation.rs`: Grid mutation, carried items, construction pheromone, separation steering, player dig zones, task labels.
 - `src/plugins/nest_navigation.rs`: Nest path following, grid/world conversion, collision correction, SteeringTarget conversion, debug path overlay.
 - `src/resources/nest.rs`: Nest grid model, constants, dig/stack support resources.
 - `src/resources/nest_pathfinding.rs`: Path cache and pathfinding helpers.

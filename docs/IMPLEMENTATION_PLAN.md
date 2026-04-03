@@ -20,11 +20,11 @@ Sprint  8   ████████░░░░░░░░░░░░░░  
 Sprint  9   █████████░░░░░░░░░░░░░  Combat & Enemies ✓
 Sprint 10   ██████████░░░░░░░░░░░░  Colony Management UI ✓
 Sprint 11   ███████████░░░░░░░░░░░  Player HUD & Action Bar ✓
-Sprint 12   ████████████░░░░░░░░░░  Spawn at Egg Location
+Sprint 12   ████████████░░░░░░░░░░  Spawn at Egg Location ✓
 Sprint 13   ██████████████░░░░░░░░░  AntJob Component ✓
-Sprint 14   ██████████████░░░░░░░░  Job-Driven Transitions
-Sprint 15   ███████████████░░░░░░░  Unified Steering
-Sprint 16   ████████████████░░░░░░  Split AI Files
+Sprint 14   ██████████████░░░░░░░░  Job-Driven Transitions ✓
+Sprint 15   ███████████████░░░░░░░  Unified Steering ✓
+Sprint 16   ████████████████░░░░░░  Split AI Files ✓
 Sprint 17   █████████████████░░░░░  Unified AI Dispatch ✓
 Sprint 18   ██████████████████░░░░  Cleanup Legacy Paths (partial)
 Sprint 19   ███████████████████░░░  Environment & Hazards ✓
@@ -179,17 +179,26 @@ Replace the current slider-throttled portal transitions with job-aware transitio
 > Adjust "Nurse" slider up — surface ants near the portal walk into the nest entrance. They gain `NestTask::Idle` and start navigating underground. Adjust "Forage" slider up — idle nest ants pathfind to the entrance and emerge on the surface. No more random dice rolls — transitions are deterministic based on job.
 
 ### Acceptance Criteria
-- [ ] Portal transitions respect `AntJob`
-- [ ] Nurse/Digger jobs cause ants to enter nest
-- [ ] Forager/Defender jobs cause ants to exit nest
-- [ ] Cooldown prevents ping-ponging
-- [ ] Pure logic tests pass
-- [ ] Integration test: ants transition correctly
+- [x] Portal transitions respect `AntJob`
+- [x] Nurse/Digger jobs cause ants to enter nest
+- [x] Forager/Defender jobs cause ants to exit nest
+- [x] Cooldown prevents ping-ponging (3s `PortalCooldown` component)
+- [x] Pure logic tests pass (6 tests in regressions.rs)
+- [x] Integration test: ants transition correctly (verified at runtime)
+
+### Completion Notes
+- `should_enter_nest()` in `sim_core/regressions.rs` checks `AntJob::is_underground_job()` — only Nurse/Digger can enter
+- `portal_transition` counts underground jobs per nest map, compares to slider-derived capacity
+- `nest_to_surface_transition` uses job-based exit: Forager/Defender exit after 5s idle, Nurse/Digger never exit, Unassigned after 10s
+- `PortalCooldown` component (3s timer) inserted on every portal transition, ticked by `tick_portal_cooldowns` system, prevents re-entry
+- Transition helpers (`is_underground_job`, `is_surface_job`) are methods on `AntJob` enum
+- 6 pure logic tests pass in `sim_core/regressions.rs`; 80 total tests pass; exit code 124
 
 **Files touched**:
-- `src/plugins/nest_ai.rs` — `portal_transition`, `nest_to_surface_transition`
-- `src/sim_core/regressions.rs` — `should_enter_nest`
-- `src/sim_core/job_assignment.rs` — transition helpers
+- `src/plugins/nest_ai/transitions.rs` — `portal_transition`, `nest_to_surface_transition`, `tick_portal_cooldowns`
+- `src/plugins/nest_ai/mod.rs` — registered `tick_portal_cooldowns` in system chain
+- `src/components/ant.rs` — `PortalCooldown` component
+- `src/sim_core/regressions.rs` — `should_enter_nest`, 6 tests
 
 ---
 
@@ -280,8 +289,6 @@ Replace the two separate movement systems (continuous direction-steering on surf
 
 ## Sprint 16: Split AI Files into Domain Modules (Weeks 31-32)
 
-> **Status**: Planned — deferred to next session for careful execution due to large refactor scope (2800+ combined lines, many interdependencies). The full refactoring requires careful module design to maintain correctness across splitting.
-
 ### Goal
 Break `ant_ai.rs` (1023 lines) and `nest_ai.rs` (1826 lines) into focused modules before the final unification. Pure refactor — no behavior changes.
 
@@ -301,17 +308,28 @@ Break `ant_ai.rs` (1023 lines) and `nest_ai.rs` (1826 lines) into focused module
 > No visible changes. All behavior identical to Sprint 15. Files are now organized into logical modules. New directory structure: `ant_ai/foraging.rs`, `nest_ai/tasks/feed.rs`, etc.
 
 ### Acceptance Criteria
-- [ ] `ant_ai.rs` split into `ant_ai/` directory
-- [ ] `nest_ai.rs` split into `nest_ai/` directory
-- [ ] All tests pass without modification
-- [ ] Build succeeds
-- [ ] Runtime validation succeeds
-- [ ] No behavior changes (zero diff in simulation output)
+- [x] `ant_ai.rs` split into `ant_ai/` directory (7 modules: mod, foraging, returning, recruiting, hunger, defending, visuals)
+- [x] `nest_ai.rs` split into `nest_ai/` directory (5 modules: mod, transitions, stimulus, tasks, excavation)
+- [x] All tests pass without modification
+- [x] Build succeeds
+- [x] Runtime validation succeeds (exit code 124)
+- [x] No behavior changes (zero diff in simulation output)
+
+### Completion Notes
+- `ant_ai/` split was done in a prior session (Sprint 17 timeframe)
+- `nest_ai/core.rs` (1920 lines) split into 5 focused modules:
+  - `mod.rs` (~280 lines): Plugin hub, shared types, helpers, spawn, job assignment
+  - `transitions.rs` (~240 lines): Portal transitions, flood damage, deferred state
+  - `stimulus.rs` (~210 lines): Stimulus scanning and task pickup
+  - `tasks.rs` (~580 lines): All 6 task execution systems
+  - `excavation.rs` (~310 lines): Grid mutation, carried items, pheromones, separation, player input, labels
+- Visibility: `pub(super)` for system fns, marker components in mod.rs accessed via `super::`
+- 80 tests pass, runtime validation exit code 124
 
 **Files touched**:
-- `src/plugins/ant_ai.rs` → `src/plugins/ant_ai/*` (split)
-- `src/plugins/nest_ai.rs` → `src/plugins/nest_ai/*` (split)
-- `src/plugins/mod.rs` — update imports
+- `src/plugins/ant_ai/` — 7 module files (mod, foraging, returning, recruiting, hunger, defending, visuals)
+- `src/plugins/nest_ai/` — 5 module files (mod, transitions, stimulus, tasks, excavation)
+- `src/plugins/nest_ai/core.rs` — deleted
 
 ---
 

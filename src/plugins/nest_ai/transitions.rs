@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::ant::{Ant, AntJob, AntState, ColonyMember, Health, PlayerControlled, StimulusThresholds, Underground};
+use crate::components::ant::{Ant, AntJob, AntState, ColonyMember, Health, PlayerControlled, PortalCooldown, StimulusThresholds, Underground};
 use crate::components::map::{MapId, MapMarker, MapPortal, PORTAL_RANGE};
 use crate::components::nest::{Brood, CellType, ChamberKind, NestPath, NestTask, StackedItem};
 use crate::plugins::nest_navigation::nest_grid_to_world;
@@ -14,6 +14,25 @@ use crate::resources::simulation::{SimClock, SimSpeed};
 use crate::sim_core::regressions;
 
 use super::{BroodFed, BroodRelocated, ExpandZoneDeferred};
+
+/// Tick down portal cooldown timers and remove expired ones.
+pub(super) fn tick_portal_cooldowns(
+    mut commands: Commands,
+    time: Res<Time>,
+    clock: Res<SimClock>,
+    mut query: Query<(Entity, &mut PortalCooldown)>,
+) {
+    if clock.speed == SimSpeed::Paused {
+        return;
+    }
+    let dt = time.delta_secs() * clock.speed.multiplier();
+    for (entity, mut cd) in &mut query {
+        cd.remaining -= dt;
+        if cd.remaining <= 0.0 {
+            commands.entity(entity).remove::<PortalCooldown>();
+        }
+    }
+}
 
 /// Apply flood damage to nest ants when water level is high.
 pub(super) fn apply_flood_damage(
@@ -136,7 +155,7 @@ pub(super) fn portal_transition(
     registry: Res<MapRegistry>,
     portal_query: Query<&MapPortal>,
     mut ant_query: Query<
-        (Entity, &mut Transform, &mut Ant, &ColonyMember, &mut MapId, &mut Visibility, Option<&NestTask>, &AntJob),
+        (Entity, &mut Transform, &mut Ant, &ColonyMember, &mut MapId, &mut Visibility, Option<&NestTask>, &AntJob, Option<&PortalCooldown>),
         Without<PlayerControlled>,
     >,
     mut commands: Commands,
@@ -148,7 +167,7 @@ pub(super) fn portal_transition(
     // Count total ants per colony and underground job-specific ants per nest map.
     let mut total_per_colony: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
     let mut underground_jobs_per_nest: std::collections::HashMap<Entity, (usize, usize)> = std::collections::HashMap::new(); // (nurse_count, digger_count)
-    for (_, _, _, colony, map_id, _, nest_task, job) in &ant_query {
+    for (_, _, _, colony, map_id, _, nest_task, job, _) in &ant_query {
         *total_per_colony.entry(colony.colony_id).or_insert(0) += 1;
         if nest_task.is_some() {
             let (nurse_count, digger_count) = underground_jobs_per_nest.entry(map_id.0).or_insert((0, 0));
@@ -162,7 +181,11 @@ pub(super) fn portal_transition(
 
     let mut rng = rand::thread_rng();
 
-    for (entity, mut transform, mut ant, colony, mut map_id, mut vis, _, job) in &mut ant_query {
+    for (entity, mut transform, mut ant, colony, mut map_id, mut vis, _, job, cooldown) in &mut ant_query {
+        // Skip ants with active portal cooldown.
+        if cooldown.is_some() {
+            continue;
+        }
         for portal in &portal_query {
             if portal.map != map_id.0 {
                 continue;
@@ -209,6 +232,7 @@ pub(super) fn portal_transition(
                 commands.entity(entity).insert((
                     NestTask::Wander { scan_timer: 0.0, wander_time: 0.0 },
                     StimulusThresholds::from_job(*job),
+                    PortalCooldown::new(),
                 ));
             } else {
                 if ant.state == AntState::Following {
@@ -219,6 +243,7 @@ pub(super) fn portal_transition(
                     *vis = Visibility::Inherited;
                     commands.entity(entity).remove::<NestTask>();
                     commands.entity(entity).remove::<NestPath>();
+                    commands.entity(entity).insert(PortalCooldown::new());
                 }
             }
             break;
@@ -284,7 +309,8 @@ pub(super) fn nest_to_surface_transition(
                 commands
                     .entity(entity)
                     .remove::<NestTask>()
-                    .remove::<NestPath>();
+                    .remove::<NestPath>()
+                    .insert(PortalCooldown::new());
             }
         }
     }

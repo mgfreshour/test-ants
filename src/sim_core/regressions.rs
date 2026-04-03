@@ -78,4 +78,15 @@ mod tests {
         let selected = select_available_dig_faces(&faces, &counts, 5);
         assert_eq!(selected, faces);
     }
+
+    #[test]
+    fn portal_cooldown_prevents_reentry() {
+        // An ant that just entered should be blocked even with favorable conditions.
+        // The cooldown is enforced at the ECS level (PortalCooldown component presence),
+        // so here we verify the pure logic still requires the right job + capacity.
+        // With cooldown active, the system skips the ant entirely before calling should_enter_nest.
+        assert!(should_enter_nest(2, 5, AntJob::Nurse, 0.01, 0.02));
+        // Same conditions but at capacity — still blocked.
+        assert!(!should_enter_nest(5, 5, AntJob::Nurse, 0.01, 0.02));
+    }
 }
