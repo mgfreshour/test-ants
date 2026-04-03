@@ -502,7 +502,7 @@ fn spawn_antlion(mut commands: Commands, config: Res<SimConfig>, registry: Res<M
             custom_size: Some(Vec2::splat(80.0)),
             ..default()
         },
-        Transform::from_xyz(x, y, 0.5),
+        Transform::from_xyz(x, y, 1.2),
         crate::plugins::ant_sprites::AntlionPit,
         map_id,
     ));
