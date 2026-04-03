@@ -1,15 +1,23 @@
 use bevy::prelude::*;
+use bevy_ecs_ldtk::prelude::GridCoords;
+use bevy_ecs_tilemap::tiles::TileColor;
 
 use crate::components::map::{MapId, MapKind, MapMarker};
 use crate::components::nest::{Brood, CarriedBy, CellType, DigStep, FoodEntity, NestTask};
 use crate::plugins::nest_navigation::world_to_nest_grid;
 use crate::resources::active_map::ActiveMap;
-use crate::resources::nest::{NestGrid, PlayerDigZones};
+use crate::resources::nest::{NestGrid, PlayerDigZones, NEST_HEIGHT};
 use crate::resources::nest_pathfinding::NestPathCache;
 use crate::resources::nest_pheromone::{NestPheromoneConfig, NestPheromoneGrid};
 use crate::resources::simulation::{SimClock, SimSpeed};
 
 use super::{ExcavatedCell, ExpandZone, NestTaskLabel};
+
+/// Convert nest grid coordinates to GridCoords (bevy_ecs_tilemap convention).
+/// NestGrid y=0 is top; GridCoords y=0 is bottom.
+fn nest_to_grid_coords(gx: usize, gy: usize) -> GridCoords {
+    GridCoords::new(gx as i32, (NEST_HEIGHT - 1 - gy) as i32)
+}
 
 /// Update carried item positions to follow the ant carrying them.
 pub(super) fn update_carried_item_positions(
@@ -37,12 +45,12 @@ pub(super) fn cleanup_orphaned_carried_items(
     }
 }
 
-/// Process ExpandZone markers: convert tunnel cells to chambers, update sprites and pheromones.
+/// Process ExpandZone markers: convert tunnel cells to chambers, update tile colors and pheromones.
 pub(super) fn apply_zone_expansions(
     mut commands: Commands,
     mut map_query: Query<(&mut NestGrid, &mut NestPathCache, &mut NestPheromoneGrid), With<MapMarker>>,
     mut query: Query<(Entity, &ExpandZone, &MapId)>,
-    mut tile_query: Query<(&crate::components::nest::NestTile, &mut Sprite, &MapId), Without<ExpandZone>>,
+    mut tile_query: Query<(&GridCoords, &mut TileColor, &MapId), Without<ExpandZone>>,
 ) {
     use crate::resources::nest_pheromone::chamber_kind_to_label;
 
@@ -64,9 +72,10 @@ pub(super) fn apply_zone_expansions(
                 phero.chamber_labels[label_idx] = 1.0;
             }
 
-            for (tile, mut sprite, tile_map_id) in &mut tile_query {
-                if tile_map_id.0 == map_id.0 && tile.grid_x == x && tile.grid_y == y {
-                    sprite.color = CellType::Chamber(chamber).color();
+            let target_gc = nest_to_grid_coords(x, y);
+            for (coords, mut color, tile_map_id) in &mut tile_query {
+                if tile_map_id.0 == map_id.0 && *coords == target_gc {
+                    color.0 = CellType::Chamber(chamber).color();
                     break;
                 }
             }
@@ -76,12 +85,12 @@ pub(super) fn apply_zone_expansions(
 }
 
 /// Process ExcavatedCell markers: mutate the NestGrid, invalidate path cache,
-/// and update the tile sprite so the player sees the newly dug tunnel.
+/// and update the tilemap tile color so the player sees the newly dug tunnel.
 pub(super) fn apply_excavated_cells(
     mut commands: Commands,
     mut map_query: Query<(&mut NestGrid, &mut NestPathCache), With<MapMarker>>,
     mut query: Query<(Entity, &ExcavatedCell, &MapId)>,
-    mut tile_query: Query<(&crate::components::nest::NestTile, &mut Sprite, &MapId), Without<ExcavatedCell>>,
+    mut tile_query: Query<(&GridCoords, &mut TileColor, &MapId), Without<ExcavatedCell>>,
 ) {
     for (entity, excavated, map_id) in &mut query {
         let Ok((mut grid, mut path_cache)) = map_query.get_mut(map_id.0) else {
@@ -94,10 +103,10 @@ pub(super) fn apply_excavated_cells(
             grid.set(x, y, CellType::Tunnel);
             path_cache.invalidate();
 
-            // Update the tile sprite color to match the new cell type.
-            for (tile, mut sprite, tile_map_id) in &mut tile_query {
-                if tile_map_id.0 == map_id.0 && tile.grid_x == x && tile.grid_y == y {
-                    sprite.color = CellType::Tunnel.color();
+            let target_gc = nest_to_grid_coords(x, y);
+            for (coords, mut color, tile_map_id) in &mut tile_query {
+                if tile_map_id.0 == map_id.0 && *coords == target_gc {
+                    color.0 = CellType::Tunnel.color();
                     break;
                 }
             }
@@ -231,7 +240,7 @@ pub(super) fn player_dig_zone_input(
     camera_query: Query<(&Camera, &GlobalTransform), With<crate::plugins::camera::MainCamera>>,
     active: Res<ActiveMap>,
     mut map_query: Query<(&NestGrid, &mut PlayerDigZones), With<MapMarker>>,
-    mut tile_query: Query<(&crate::components::nest::NestTile, &mut Sprite, &MapId)>,
+    mut tile_query: Query<(&GridCoords, &mut TileColor, &MapId)>,
 ) {
     // Only process when viewing a nest.
     if !matches!(active.kind, MapKind::Nest { .. }) {
@@ -253,14 +262,16 @@ pub(super) fn player_dig_zone_input(
 
     let Ok((grid, mut dig_zones)) = map_query.get_mut(active.entity) else { return };
 
+    let target_gc = nest_to_grid_coords(gx, gy);
+
     if left {
         // Only allow marking diggable cells.
         if grid.get(gx, gy).is_diggable() {
             dig_zones.cells.insert((gx, gy));
             // Tint the tile to show it's designated.
-            for (tile, mut sprite, tile_map) in &mut tile_query {
-                if tile_map.0 == active.entity && tile.grid_x == gx && tile.grid_y == gy {
-                    sprite.color = Color::srgb(0.6, 0.45, 0.2);
+            for (coords, mut color, tile_map) in &mut tile_query {
+                if tile_map.0 == active.entity && *coords == target_gc {
+                    color.0 = Color::srgb(0.6, 0.45, 0.2);
                     break;
                 }
             }
@@ -269,9 +280,9 @@ pub(super) fn player_dig_zone_input(
         if dig_zones.cells.remove(&(gx, gy)) {
             // Restore original color.
             let cell = grid.get(gx, gy);
-            for (tile, mut sprite, tile_map) in &mut tile_query {
-                if tile_map.0 == active.entity && tile.grid_x == gx && tile.grid_y == gy {
-                    sprite.color = cell.color();
+            for (coords, mut color, tile_map) in &mut tile_query {
+                if tile_map.0 == active.entity && *coords == target_gc {
+                    color.0 = cell.color();
                     break;
                 }
             }

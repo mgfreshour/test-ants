@@ -3,7 +3,7 @@ use rand::Rng;
 
 use crate::components::ant::{Ant, AntJob, AntState, Caste, ColonyMember, Health, Movement, PositionHistory, StimulusThresholds, SteeringTarget, SteeringWeights, TrailSense};
 use crate::components::map::{MapId, MapKind, MapMarker, spawn_portal_pair};
-use crate::components::nest::{Brood, BroodStage, CellType, ChamberKind, NestTask, NestTile, Queen, QueenHunger};
+use crate::components::nest::{Brood, BroodStage, CellType, ChamberKind, NestTask, Queen, QueenHunger};
 use crate::plugins::ant_ai::ColonyFood;
 use crate::plugins::camera::MainCamera;
 use crate::resources::active_map::{ActiveMap, MapRegistry, SavedCamera, SavedCameraStates};
@@ -44,7 +44,7 @@ impl Plugin for NestPlugin {
             .add_systems(PreStartup, setup_maps)
             .add_systems(
                 Startup,
-                (render_nest, spawn_queen).after(setup_maps),
+                spawn_queen.after(setup_maps),
             )
             .add_systems(
                 Update,
@@ -136,34 +136,6 @@ fn setup_maps(mut commands: Commands, config: Res<SimConfig>) {
         maps: vec![surface, player_nest, red_nest],
     });
     commands.insert_resource(SavedCameraStates::default());
-}
-
-// ── Startup rendering ────────────────────────────────────────────────
-
-fn render_nest(
-    mut commands: Commands,
-    map_query: Query<(Entity, &NestGrid), With<MapMarker>>,
-) {
-    for (map_entity, grid) in &map_query {
-        for y in 0..grid.height {
-            for x in 0..grid.width {
-                let cell = grid.get(x, y);
-                let w = nest_grid_to_world(x, y);
-
-                commands.spawn((
-                    Sprite {
-                        color: cell.color(),
-                        custom_size: Some(Vec2::splat(NEST_CELL_SIZE)),
-                        ..default()
-                    },
-                    Transform::from_xyz(w.x, w.y, 0.0),
-                    Visibility::Hidden,
-                    NestTile { grid_x: x, grid_y: y },
-                    MapId(map_entity),
-                ));
-            }
-        }
-    }
 }
 
 fn spawn_queen(

@@ -1,4 +1,6 @@
 use bevy::prelude::*;
+use bevy_ecs_ldtk::prelude::GridCoords;
+use bevy_ecs_tilemap::tiles::TileColor;
 use rand::Rng;
 
 use crate::components::ant::{Ant, AntJob, AntState, ColonyMember, Health, Movement, PlayerControlled, PortalCooldown, PositionHistory, StimulusThresholds, Underground};
@@ -7,7 +9,7 @@ use crate::components::nest::{Brood, CellType, ChamberKind, NestPath, NestTask, 
 use crate::plugins::nest_navigation::nest_grid_to_world;
 use crate::resources::active_map::MapRegistry;
 use crate::resources::colony::BehaviorSliders;
-use crate::resources::nest::{NestGrid, TileStackRegistry, stack_position_offset};
+use crate::resources::nest::{NestGrid, TileStackRegistry, NEST_HEIGHT, stack_position_offset};
 use crate::resources::nest_pathfinding::NestPathCache;
 use crate::resources::nest_pheromone::NestPheromoneGrid;
 use crate::resources::simulation::{SimClock, SimSpeed};
@@ -113,7 +115,7 @@ pub(super) fn apply_deferred_zone_expansions(
     mut commands: Commands,
     mut map_query: Query<(&mut NestGrid, &mut NestPathCache, &mut NestPheromoneGrid), With<MapMarker>>,
     query: Query<(Entity, &ExpandZoneDeferred)>,
-    mut tile_query: Query<(&crate::components::nest::NestTile, &mut Sprite, &MapId)>,
+    mut tile_query: Query<(&GridCoords, &mut TileColor, &MapId)>,
 ) {
     use crate::resources::nest_pheromone::chamber_kind_to_label;
 
@@ -135,9 +137,10 @@ pub(super) fn apply_deferred_zone_expansions(
                 phero.chamber_labels[label_idx] = 1.0;
             }
 
-            for (tile, mut sprite, tile_map_id) in &mut tile_query {
-                if tile_map_id.0 == expand.map && tile.grid_x == x && tile.grid_y == y {
-                    sprite.color = CellType::Chamber(chamber).color();
+            let target_gc = GridCoords::new(x as i32, (NEST_HEIGHT - 1 - y) as i32);
+            for (coords, mut color, tile_map_id) in &mut tile_query {
+                if tile_map_id.0 == expand.map && *coords == target_gc {
+                    color.0 = CellType::Chamber(chamber).color();
                     break;
                 }
             }

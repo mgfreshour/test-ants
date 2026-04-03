@@ -20,6 +20,24 @@ pub enum ChamberKind {
     Midden,
 }
 
+/// Convert an LDtk IntGrid value to a CellType.
+/// Mapping: 1=Soil, 2=SoftSoil, 3=Clay, 4=Rock, 5=Tunnel,
+/// 6=Chamber(Queen), 7=Chamber(Brood), 8=Chamber(FoodStorage), 9=Chamber(Midden)
+pub fn intgrid_to_celltype(value: i32) -> CellType {
+    match value {
+        1 => CellType::Soil,
+        2 => CellType::SoftSoil,
+        3 => CellType::Clay,
+        4 => CellType::Rock,
+        5 => CellType::Tunnel,
+        6 => CellType::Chamber(ChamberKind::Queen),
+        7 => CellType::Chamber(ChamberKind::Brood),
+        8 => CellType::Chamber(ChamberKind::FoodStorage),
+        9 => CellType::Chamber(ChamberKind::Midden),
+        _ => CellType::Soil,
+    }
+}
+
 impl CellType {
     pub fn is_passable(&self) -> bool {
         matches!(self, CellType::Tunnel | CellType::Chamber(_))

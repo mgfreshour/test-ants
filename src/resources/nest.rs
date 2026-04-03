@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::components::nest::{CellType, ChamberKind};
+use crate::components::nest::{CellType, ChamberKind, intgrid_to_celltype};
 
 pub const NEST_WIDTH: usize = 60;
 pub const NEST_HEIGHT: usize = 40;
@@ -90,6 +90,22 @@ impl Default for NestGrid {
 }
 
 impl NestGrid {
+    /// Build a NestGrid from LDtk IntGrid tile data.
+    /// Takes (GridCoords.x, GridCoords.y, IntGrid value) tuples.
+    /// GridCoords uses y=0 at bottom (Bevy convention); NestGrid uses y=0 at top.
+    pub fn from_intgrid(width: usize, height: usize, tiles: &[(i32, i32, i32)]) -> Self {
+        let mut cells = vec![vec![CellType::Soil; width]; height];
+        for &(gx, gy, value) in tiles {
+            // Flip Y: GridCoords y=0 is bottom, NestGrid y=0 is top
+            let nest_y = (height as i32 - 1 - gy) as usize;
+            let nest_x = gx as usize;
+            if nest_x < width && nest_y < height {
+                cells[nest_y][nest_x] = intgrid_to_celltype(value);
+            }
+        }
+        Self { width, height, cells }
+    }
+
     pub fn get(&self, x: usize, y: usize) -> CellType {
         if y < self.height && x < self.width {
             self.cells[y][x]
@@ -376,5 +392,80 @@ mod tests {
 
         registry.remove((0, 0), e);
         assert!(!registry.stacks.contains_key(&(0, 0)));
+    }
+
+    #[test]
+    fn from_intgrid_basic_mapping() {
+        // GridCoords y=0 is bottom, NestGrid y=0 is top.
+        // 3x3 grid, height=3 so nest_y = 2 - GridCoords.y
+        let tiles = vec![
+            (0, 2, 1), // GridCoords(0,2) = top row → NestGrid(0,0) = Soil
+            (1, 2, 5), // GridCoords(1,2) = top row → NestGrid(1,0) = Tunnel
+            (2, 2, 4), // GridCoords(2,2) = top row → NestGrid(2,0) = Rock
+            (0, 1, 2), // GridCoords(0,1) = mid row → NestGrid(0,1) = SoftSoil
+            (1, 1, 6), // GridCoords(1,1) = mid row → NestGrid(1,1) = Chamber(Queen)
+            (2, 1, 3), // GridCoords(2,1) = mid row → NestGrid(2,1) = Clay
+            (0, 0, 7), // GridCoords(0,0) = bot row → NestGrid(0,2) = Chamber(Brood)
+            (1, 0, 8), // GridCoords(1,0) = bot row → NestGrid(1,2) = Chamber(FoodStorage)
+            (2, 0, 9), // GridCoords(2,0) = bot row → NestGrid(2,2) = Chamber(Midden)
+        ];
+
+        let grid = NestGrid::from_intgrid(3, 3, &tiles);
+        assert_eq!(grid.width, 3);
+        assert_eq!(grid.height, 3);
+
+        // Top row (NestGrid y=0)
+        assert_eq!(grid.get(0, 0), CellType::Soil);
+        assert_eq!(grid.get(1, 0), CellType::Tunnel);
+        assert_eq!(grid.get(2, 0), CellType::Rock);
+
+        // Middle row (NestGrid y=1)
+        assert_eq!(grid.get(0, 1), CellType::SoftSoil);
+        assert_eq!(grid.get(1, 1), CellType::Chamber(ChamberKind::Queen));
+        assert_eq!(grid.get(2, 1), CellType::Clay);
+
+        // Bottom row (NestGrid y=2)
+        assert_eq!(grid.get(0, 2), CellType::Chamber(ChamberKind::Brood));
+        assert_eq!(grid.get(1, 2), CellType::Chamber(ChamberKind::FoodStorage));
+        assert_eq!(grid.get(2, 2), CellType::Chamber(ChamberKind::Midden));
+    }
+
+    #[test]
+    fn from_intgrid_matches_default_layout() {
+        // Build a NestGrid from default, convert to intgrid tiles, rebuild, compare.
+        let default_grid = NestGrid::default();
+        let mut tiles = Vec::new();
+        for y in 0..default_grid.height {
+            for x in 0..default_grid.width {
+                let cell = default_grid.get(x, y);
+                let value = match cell {
+                    CellType::Soil => 1,
+                    CellType::SoftSoil => 2,
+                    CellType::Clay => 3,
+                    CellType::Rock => 4,
+                    CellType::Tunnel => 5,
+                    CellType::Chamber(ChamberKind::Queen) => 6,
+                    CellType::Chamber(ChamberKind::Brood) => 7,
+                    CellType::Chamber(ChamberKind::FoodStorage) => 8,
+                    CellType::Chamber(ChamberKind::Midden) => 9,
+                };
+                // Convert nest y to GridCoords y (flip)
+                let gc_y = (default_grid.height - 1 - y) as i32;
+                tiles.push((x as i32, gc_y, value));
+            }
+        }
+
+        let rebuilt = NestGrid::from_intgrid(default_grid.width, default_grid.height, &tiles);
+
+        for y in 0..default_grid.height {
+            for x in 0..default_grid.width {
+                assert_eq!(
+                    rebuilt.get(x, y),
+                    default_grid.get(x, y),
+                    "Mismatch at ({}, {}): rebuilt={:?}, default={:?}",
+                    x, y, rebuilt.get(x, y), default_grid.get(x, y)
+                );
+            }
+        }
     }
 }
