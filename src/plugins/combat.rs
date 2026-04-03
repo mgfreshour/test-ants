@@ -493,9 +493,6 @@ fn spawn_antlion(mut commands: Commands, config: Res<SimConfig>, registry: Res<M
         }
     };
 
-    info!("Antlion spawned at ({:.0}, {:.0}), player_nest=({:.0},{:.0}), enemy_nest=({:.0},{:.0})",
-        x, y, player_nest.x, player_nest.y, enemy_nest.x, enemy_nest.y);
-
     let map_id = MapId(registry.surface);
 
     // Pit visual — larger, slightly transparent circle.
@@ -505,7 +502,7 @@ fn spawn_antlion(mut commands: Commands, config: Res<SimConfig>, registry: Res<M
             custom_size: Some(Vec2::splat(80.0)),
             ..default()
         },
-        Transform::from_xyz(x, y, 0.8),
+        Transform::from_xyz(x, y, 0.5),
         crate::plugins::ant_sprites::AntlionPit,
         map_id,
     ));

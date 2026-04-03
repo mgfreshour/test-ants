@@ -38,9 +38,9 @@ fn setup_camera(mut commands: Commands, config: Res<SimConfig>) {
 }
 
 const PAN_SPEED: f32 = 500.0;
-const ZOOM_SPEED: f32 = 0.1;
+const ZOOM_SPEED: f32 = 0.02;
 const MIN_ZOOM: f32 = 0.2;
-const MAX_ZOOM: f32 = 5.0;
+const MAX_ZOOM: f32 = 2.5;
 
 fn camera_pan(
     input: Res<ButtonInput<KeyCode>>,

@@ -137,7 +137,7 @@ impl Default for SpiderAnimation {
 
 // ── Food spritesheet ──────────────────────────────────────────────
 
-const FOOD_FRAME_SIZE: u32 = 48;
+const FOOD_FRAME_SIZE: u32 = 32;
 const FOOD_COLS: u32 = 8;
 const FOOD_ROWS: u32 = 1;
 
@@ -147,8 +147,8 @@ const FOOD_LARGE: [usize; 4] = [0, 1, 2, 3]; // big food (amount > 50)
 const FOOD_SMALL: [usize; 4] = [4, 5, 6, 7]; // small food (amount <= 50)
 
 /// Display sizes for food sprites
-const FOOD_LARGE_SIZE: f32 = 24.0;  // Large meat items
-const FOOD_SMALL_SIZE: f32 = 18.0;  // Small snacks
+const FOOD_LARGE_SIZE: f32 = 14.0;  // Large meat items
+const FOOD_SMALL_SIZE: f32 = 10.0;  // Small snacks
 
 #[derive(Resource)]
 pub struct FoodSpritesheet {
@@ -456,7 +456,6 @@ fn retrofit_antlion_sprites(
     let Some(sheet) = sheet else { return };
 
     for (entity, mut sprite) in &mut creature_query {
-        info!("Retrofit antlion creature sprite: {:?}", entity);
         sprite.image = sheet.image.clone();
         sprite.custom_size = Some(Vec2::splat(24.0));
         sprite.color = Color::WHITE;
@@ -468,7 +467,6 @@ fn retrofit_antlion_sprites(
     }
 
     for (entity, mut sprite) in &mut pit_query {
-        info!("Retrofit antlion pit sprite: {:?}", entity);
         sprite.image = sheet.image.clone();
         sprite.custom_size = Some(Vec2::splat(80.0));
         sprite.color = Color::WHITE;
@@ -500,10 +498,9 @@ fn animate_antlion_sprites(
 }
 
 fn select_antlion_row(
-    mut creature_query: Query<(&Antlion, &mut AntlionAnimation, &mut Sprite)>,
-    mut pit_query: Query<(&AntlionAnimation, &mut Sprite), (With<AntlionPit>, Without<Antlion>)>,
+    mut query: Query<(&Antlion, &mut AntlionAnimation, &mut Sprite)>,
 ) {
-    for (antlion, mut anim, mut sprite) in &mut creature_query {
+    for (antlion, mut anim, mut sprite) in &mut query {
         let row = if antlion.hp <= 0.0 {
             ANTLION_ROW_DEATH
         } else {
@@ -516,13 +513,6 @@ fn select_antlion_row(
             anim.timer = 0.0;
         }
 
-        let index = anim.row * ANTLION_COLS as usize + anim.frame;
-        if let Some(ref mut atlas) = sprite.texture_atlas {
-            atlas.index = index;
-        }
-    }
-
-    for (anim, mut sprite) in &mut pit_query {
         let index = anim.row * ANTLION_COLS as usize + anim.frame;
         if let Some(ref mut atlas) = sprite.texture_atlas {
             atlas.index = index;
