@@ -10,6 +10,7 @@ use crate::components::terrain::FoodSource;
 use crate::plugins::ant_ai::ColonyFood;
 use crate::plugins::combat::GameResult;
 use crate::plugins::spider_ai::Spider;
+use crate::plugins::combat::Antlion;
 use crate::plugins::pheromone::{OverlayDisplay, OverlayState};
 use crate::plugins::nest_pheromone::NestPheromoneOverlayState;
 use crate::plugins::player::{
@@ -639,6 +640,7 @@ fn minimap_panel(
     ant_query: Query<(&Transform, &ColonyMember, Option<&PlayerControlled>), With<Ant>>,
     food_query: Query<(&Transform, &FoodSource)>,
     spider_query: Query<&Transform, With<Spider>>,
+    antlion_query: Query<(&Transform, &Antlion)>,
 ) {
     if !matches!(active.kind, MapKind::Surface) {
         return;
@@ -709,6 +711,23 @@ fn minimap_panel(
                     egui::pos2(x, y),
                     2.5,
                     egui::Color32::from_rgb(120, 80, 40),
+                );
+            }
+
+            // Antlions (pit + creature dot)
+            for (tf, antlion) in &antlion_query {
+                let x = rect.left() + tf.translation.x * scale_x;
+                let y = rect.bottom() - tf.translation.y * scale_y;
+                let pit_r = antlion.pit_radius * scale_x;
+                painter.circle_filled(
+                    egui::pos2(x, y),
+                    pit_r,
+                    egui::Color32::from_rgba_unmultiplied(180, 160, 110, 80),
+                );
+                painter.circle_filled(
+                    egui::pos2(x, y),
+                    2.0,
+                    egui::Color32::from_rgb(140, 110, 60),
                 );
             }
 
