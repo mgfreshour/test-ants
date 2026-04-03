@@ -9,6 +9,7 @@ use bevy::window::WindowResolution;
 
 use plugins::simulation::SimulationPlugin;
 use plugins::terrain::TerrainPlugin;
+use plugins::ldtk_maps::LdtkMapsPlugin;
 use plugins::ant_ai::AntAiPlugin;
 use plugins::camera::CameraPlugin;
 use plugins::environment::EnvironmentPlugin;
@@ -37,6 +38,7 @@ fn main() {
         .add_plugins((
             SimulationPlugin,
             TerrainPlugin,
+            LdtkMapsPlugin,
             AntAiPlugin,
             CameraPlugin,
             EnvironmentPlugin,
@@ -44,6 +46,8 @@ fn main() {
             NestAiPlugin,
             NestPheromonePlugin,
             NestNavigationPlugin,
+        ))
+        .add_plugins((
             PheromonePlugin,
             PlayerPlugin,
             SteeringPlugin,

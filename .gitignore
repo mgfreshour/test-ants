@@ -1,1 +1,3 @@
 /target
+# LDtk editor backups
+*.ldtk.bak

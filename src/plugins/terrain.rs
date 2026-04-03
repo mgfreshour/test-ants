@@ -28,13 +28,9 @@ impl Plugin for TerrainPlugin {
     }
 }
 
+/// Spawns nest entrance markers on the surface.
+/// Grass tiles are now loaded from the LDtk project via LdtkMapsPlugin.
 fn setup_terrain(mut commands: Commands, config: Res<SimConfig>, registry: Res<MapRegistry>) {
-    let tile_count_x = (config.world_width / config.tile_size) as i32;
-    let tile_count_y = (config.world_height / config.tile_size) as i32;
-
-    let grass_dark = Color::srgb(0.22, 0.45, 0.15);
-    let grass_light = Color::srgb(0.28, 0.52, 0.18);
-
     // Nest entrance marker — dark mound with hole
     let np = config.nest_position;
     let mound_color = Color::srgb(0.35, 0.25, 0.15);
@@ -59,29 +55,6 @@ fn setup_terrain(mut commands: Commands, config: Res<SimConfig>, registry: Res<M
         Transform::from_xyz(np.x, np.y, 1.1),
         MapId(registry.surface),
     ));
-
-    for x in 0..tile_count_x {
-        for y in 0..tile_count_y {
-            let color = if (x + y) % 2 == 0 {
-                grass_dark
-            } else {
-                grass_light
-            };
-
-            let world_x = x as f32 * config.tile_size + config.tile_size / 2.0;
-            let world_y = y as f32 * config.tile_size + config.tile_size / 2.0;
-
-            commands.spawn((
-                Sprite {
-                    color,
-                    custom_size: Some(Vec2::splat(config.tile_size)),
-                    ..default()
-                },
-                Transform::from_xyz(world_x, world_y, 0.0),
-                MapId(registry.surface),
-            ));
-        }
-    }
 }
 
 fn spawn_food_sources(mut commands: Commands, config: Res<SimConfig>, registry: Res<MapRegistry>) {

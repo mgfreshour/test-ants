@@ -1,3 +1,4 @@
+pub mod ldtk_maps;
 pub mod simulation;
 pub mod terrain;
 pub mod ant_ai;
