@@ -3,7 +3,7 @@ use bevy_ecs_ldtk::prelude::GridCoords;
 use bevy_ecs_tilemap::tiles::{TileColor, TileTextureIndex};
 use rand::Rng;
 
-use crate::components::ant::{Ant, AntJob, AntState, ColonyMember, Health, Movement, PlayerControlled, PortalCooldown, PositionHistory, StimulusThresholds, Underground};
+use crate::components::ant::{Ant, AntJob, AntState, ColonyMember, DamageSource, Health, Movement, PlayerControlled, PortalCooldown, PositionHistory, StimulusThresholds, Underground};
 use crate::components::map::{MapId, MapMarker, MapPortal, PORTAL_RANGE};
 use crate::components::nest::{Brood, CellType, ChamberKind, NestPath, NestTask, StackedItem};
 use crate::plugins::nest_navigation::nest_grid_to_world;
@@ -44,7 +44,7 @@ pub(super) fn apply_flood_damage(
     if env.flood_level > 0.1 {
         let damage = env.flood_level * 10.0; // Scale damage by flood level
         for mut health in &mut query {
-            health.current -= damage * 0.016; // Per-frame damage
+            health.apply_damage(damage * 0.016, DamageSource::Flood); // Per-frame damage
         }
     }
 }

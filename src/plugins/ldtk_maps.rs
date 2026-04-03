@@ -390,7 +390,7 @@ fn spawn_queens_from_ldtk(
             crate::components::nest::QueenTask::Idle { timer: 0.0 },
             crate::components::ant::ColonyMember { colony_id },
             *map_id,
-            crate::components::ant::Health { current: 100.0, max: 100.0 },
+            crate::components::ant::Health { current: 100.0, max: 100.0, last_damage_source: None },
         ));
 
         spawned_any = true;

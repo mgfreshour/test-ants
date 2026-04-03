@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::ant::{Ant, Health};
+use crate::components::ant::{Ant, DamageSource, Health};
 use crate::components::map::MapId;
 use crate::resources::active_map::MapRegistry;
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
@@ -112,6 +112,16 @@ pub enum HazardKind {
     Footstep,
     Lawnmower,
     Pesticide,
+}
+
+impl From<HazardKind> for DamageSource {
+    fn from(kind: HazardKind) -> Self {
+        match kind {
+            HazardKind::Footstep => DamageSource::Footstep,
+            HazardKind::Lawnmower => DamageSource::Lawnmower,
+            HazardKind::Pesticide => DamageSource::Pesticide,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -307,7 +317,7 @@ fn update_hazard_events(
                 pos.distance(hazard.position) < hazard.radius
             };
             if hit {
-                health.current -= hazard.damage_per_tick * delta;
+                health.apply_damage(hazard.damage_per_tick * delta, DamageSource::from(hazard.kind));
             }
         }
     }

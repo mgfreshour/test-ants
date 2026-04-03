@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use rand::Rng;
 
 use crate::components::ant::{
-    Ant, AntState, CarriedItem, ColonyMember, Health, Movement, PlayerControlled,
+    Ant, AntState, CarriedItem, ColonyMember, DamageSource, Health, Movement, PlayerControlled,
     PositionHistory, TrailSense,
 };
 use crate::components::map::MapId;
@@ -256,7 +256,7 @@ fn combat_resolution(
         if nearby_enemies > 0 {
             let base_dps = 3.0 + rng.gen_range(-0.5..0.5);
             let damage = base_dps * nearby_enemies as f32 * dt;
-            health.current -= damage;
+            health.apply_damage(damage, DamageSource::EnemyAnt);
 
             // Apply hit flash effect.
             commands.entity(entity).insert(HitFlash {
@@ -355,7 +355,7 @@ fn spider_ai(
         for (ant_tf, mut health) in &mut ant_query {
             let dist = spider_pos.distance(ant_tf.translation.truncate());
             if dist < spider_range {
-                health.current -= 8.0;
+                health.apply_damage(8.0, DamageSource::Spider);
                 spider.attack_cooldown = 0.5;
                 break;
             }
@@ -388,7 +388,7 @@ fn player_attack(
             continue;
         }
         if player_pos.distance(tf.translation.truncate()) < attack_range {
-            health.current -= damage;
+            health.apply_damage(damage, DamageSource::Player);
             hit = true;
             break;
         }
@@ -415,7 +415,7 @@ fn death_system(
     for (entity, transform, health, ant) in &ant_query {
         if health.current <= 0.0 {
             let pos = transform.translation;
-            let reason = if ant.hunger >= 1.0 { "starvation" } else { "combat" };
+            let reason = health.last_damage_source.map(|s| s.to_string()).unwrap_or_else(|| "unknown".into());
             info!("Ant died: reason={}, age={:.0}s, pos=({:.0},{:.0})", reason, ant.age, pos.x, pos.y);
             commands.entity(entity).despawn();
             // Corpse
@@ -595,7 +595,7 @@ fn antlion_ai(
 
                 // Damage increases as ant nears center.
                 if dist < antlion.pit_radius * 0.5 {
-                    health.current -= antlion.damage_per_sec * dt;
+                    health.apply_damage(antlion.damage_per_sec * dt, DamageSource::Antlion);
                 }
             }
         }

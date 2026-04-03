@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use rand::Rng;
 
-use crate::components::ant::{Ant, AntJob, AntState, Caste, ColonyMember, Health, Movement, PositionHistory, StimulusThresholds, SteeringTarget, SteeringWeights, TrailSense};
+use crate::components::ant::{Ant, AntJob, AntState, Caste, ColonyMember, DamageSource, Health, Movement, PositionHistory, StimulusThresholds, SteeringTarget, SteeringWeights, TrailSense};
 use crate::components::map::{MapId, MapKind, MapMarker};
 use crate::components::nest::{Brood, BroodStage, CellType, ChamberKind, NestTask, Queen, QueenHunger, QueenTask};
 use crate::plugins::ant_ai::ColonyFood;
@@ -283,7 +283,7 @@ fn queen_starvation_damage(
         if hunger.satiation <= 0.0 {
             hunger.starvation_timer += dt;
             if hunger.starvation_timer >= STARVATION_GRACE_PERIOD {
-                health.current = (health.current - STARVATION_DAMAGE_RATE * dt).max(0.0);
+                health.apply_damage(STARVATION_DAMAGE_RATE * dt, DamageSource::QueenStarvation);
             }
         } else {
             hunger.starvation_timer = 0.0;

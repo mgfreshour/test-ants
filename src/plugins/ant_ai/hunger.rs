@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use crate::components::ant::{Ant, CarriedItem, ColonyMember, Health};
+use crate::components::ant::{Ant, CarriedItem, ColonyMember, DamageSource, Health};
 use crate::components::map::{MapId, MapMarker};
 use crate::components::nest::NestTask;
 use crate::resources::active_map::MapRegistry;
@@ -41,7 +41,9 @@ pub fn hunger_tick(
             STARVATION_DPS,
         );
         ant.hunger = next_hunger;
-        health.current -= hp_loss;
+        if hp_loss > 0.0 {
+            health.apply_damage(hp_loss, DamageSource::Starvation);
+        }
     }
 }
 

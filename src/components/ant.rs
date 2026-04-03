@@ -134,10 +134,42 @@ impl PortalCooldown {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DamageSource {
+    EnemyAnt,
+    Spider,
+    Player,
+    Antlion,
+    Pesticide,
+    Lawnmower,
+    Footstep,
+    Starvation,
+    Flood,
+    QueenStarvation,
+}
+
+impl std::fmt::Display for DamageSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EnemyAnt => write!(f, "enemy ant"),
+            Self::Spider => write!(f, "spider"),
+            Self::Player => write!(f, "player"),
+            Self::Antlion => write!(f, "antlion"),
+            Self::Pesticide => write!(f, "pesticide"),
+            Self::Lawnmower => write!(f, "lawnmower"),
+            Self::Footstep => write!(f, "footstep"),
+            Self::Starvation => write!(f, "starvation"),
+            Self::Flood => write!(f, "flood"),
+            Self::QueenStarvation => write!(f, "queen starvation"),
+        }
+    }
+}
+
 #[derive(Component)]
 pub struct Health {
     pub current: f32,
     pub max: f32,
+    pub last_damage_source: Option<DamageSource>,
 }
 
 #[derive(Component)]
@@ -261,17 +293,49 @@ impl Movement {
 }
 
 impl Health {
+    pub fn apply_damage(&mut self, amount: f32, source: DamageSource) {
+        self.current = (self.current - amount).max(0.0);
+        self.last_damage_source = Some(source);
+    }
+
     pub fn worker() -> Self {
-        Self {
-            current: 10.0,
-            max: 10.0,
-        }
+        Self { current: 10.0, max: 10.0, last_damage_source: None }
     }
 
     pub fn soldier() -> Self {
-        Self {
-            current: 25.0,
-            max: 25.0,
-        }
+        Self { current: 25.0, max: 25.0, last_damage_source: None }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_damage_records_source() {
+        let mut h = Health::worker();
+        assert_eq!(h.last_damage_source, None);
+
+        h.apply_damage(3.0, DamageSource::Spider);
+        assert_eq!(h.current, 7.0);
+        assert_eq!(h.last_damage_source, Some(DamageSource::Spider));
+
+        h.apply_damage(2.0, DamageSource::Starvation);
+        assert_eq!(h.current, 5.0);
+        assert_eq!(h.last_damage_source, Some(DamageSource::Starvation));
+    }
+
+    #[test]
+    fn apply_damage_clamps_at_zero() {
+        let mut h = Health::worker();
+        h.apply_damage(999.0, DamageSource::Lawnmower);
+        assert_eq!(h.current, 0.0);
+        assert_eq!(h.last_damage_source, Some(DamageSource::Lawnmower));
+    }
+
+    #[test]
+    fn damage_source_display() {
+        assert_eq!(DamageSource::EnemyAnt.to_string(), "enemy ant");
+        assert_eq!(DamageSource::QueenStarvation.to_string(), "queen starvation");
     }
 }
