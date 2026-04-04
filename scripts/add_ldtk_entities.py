@@ -85,7 +85,7 @@ def make_field_def(uid, identifier, field_type, default_val=None):
         "symmetricalRef": False,
         "textLanguageMode": None,
         "tilesetUid": None,
-        "type": field_type,
+        "type": f"F_{field_type}",
         "uid": uid,
         "useForSmartColor": False,
     }

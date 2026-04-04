@@ -479,7 +479,8 @@ fn player_movement(
     nest_query: Query<&NestGrid, With<MapMarker>>,
     mut commands: Commands,
     mut query: Query<
-        (Entity, &mut Transform, &Movement, &mut Ant, &MapId, Option<&ClickMoveTarget>),
+        (Entity, &mut Transform, &Movement, &mut Ant, &MapId,
+         Option<&ClickMoveTarget>, Option<&mut SteeringTarget>),
         With<PlayerControlled>
     >,
 ) {
@@ -487,7 +488,8 @@ fn player_movement(
         return;
     }
 
-    let Ok((player_entity, mut transform, movement, mut ant, map_id, click_target)) = query.single_mut() else {
+    let Ok((player_entity, mut transform, movement, mut ant, map_id,
+            click_target, steering_target)) = query.single_mut() else {
         return;
     };
 
@@ -513,7 +515,8 @@ fn player_movement(
         if click_target.is_some() {
             commands.entity(player_entity)
                 .remove::<ClickMoveTarget>()
-                .remove::<SteeringTarget>();
+                .remove::<SteeringTarget>()
+                .remove::<SteeringWeights>();
         }
 
         let dir = dir.normalize();
@@ -549,22 +552,65 @@ fn player_movement(
     // Handle click-to-move if active
     if let Some(click) = click_target {
         let player_pos = transform.translation.truncate();
+        let dt = time.delta_secs() * clock.speed.multiplier();
 
         // Check if different map type (player transitioned through portal)
         if is_underground != !click.on_surface {
             commands.entity(player_entity)
                 .remove::<ClickMoveTarget>()
-                .remove::<SteeringTarget>();
+                .remove::<SteeringTarget>()
+                .remove::<SteeringWeights>();
             return;
         }
 
         if is_underground {
-            // NEST: Steering system handles movement via SteeringTarget
-            // Check if reached destination
-            if player_pos.distance(click.target) < 5.0 {
+            // NEST: Follow waypoints directly from SteeringTarget::Path
+            let mut done = false;
+            if let Some(mut st) = steering_target {
+                if let SteeringTarget::Path { ref waypoints, ref mut index } = *st {
+                    if *index < waypoints.len() {
+                        let target_wp = waypoints[*index];
+                        let to_target = target_wp - player_pos;
+                        let dist = to_target.length();
+
+                        if dist < 3.0 {
+                            // Snap to waypoint and advance
+                            transform.translation.x = target_wp.x;
+                            transform.translation.y = target_wp.y;
+                            *index += 1;
+                            if *index >= waypoints.len() {
+                                done = true;
+                            }
+                        } else {
+                            let move_dir = to_target.normalize();
+                            let step = move_dir * NEST_PLAYER_SPEED * dt;
+                            if step.length() > dist {
+                                transform.translation.x = target_wp.x;
+                                transform.translation.y = target_wp.y;
+                                *index += 1;
+                                if *index >= waypoints.len() {
+                                    done = true;
+                                }
+                            } else {
+                                transform.translation.x += step.x;
+                                transform.translation.y += step.y;
+                            }
+                        }
+                    } else {
+                        done = true;
+                    }
+                } else {
+                    done = true;
+                }
+            } else {
+                done = true;
+            }
+
+            if done {
                 commands.entity(player_entity)
                     .remove::<ClickMoveTarget>()
-                    .remove::<SteeringTarget>();
+                    .remove::<SteeringTarget>()
+                    .remove::<SteeringWeights>();
             }
         } else {
             // SURFACE: Direct movement toward target
@@ -578,9 +624,8 @@ fn player_movement(
                 commands.entity(player_entity).remove::<ClickMoveTarget>();
             } else {
                 // Move toward target
-                let dir = to_target.normalize();
-                let speed = movement.speed * clock.speed.multiplier() * time.delta_secs();
-                let step = dir * speed;
+                let move_dir = to_target.normalize();
+                let step = move_dir * movement.speed * dt;
 
                 if step.length() > dist {
                     transform.translation.x = click.target.x;

@@ -360,7 +360,7 @@ def apply_rules_to_intgrid(intgrid_csv, grid_w, grid_h, rule_groups, tileset_uid
                         "src": [src_x, src_y],
                         "f": 0,
                         "t": tile_id,
-                        "d": [cy * grid_w + cx],
+                        "d": [rule["uid"], cy * grid_w + cx],
                         "a": 1.0,
                     })
 
