@@ -5,3 +5,5 @@
 # WASM build artifacts
 web/out/
 web/assets/
+# AI decision logs
+logs/

@@ -3,6 +3,7 @@
 //! This module is the home for deterministic simulation code that can be unit
 //! tested without Bevy ECS world setup, rendering components, or UI concerns.
 
+pub mod ai_log;
 pub mod ant_logic;
 pub mod clock;
 pub mod job_assignment;

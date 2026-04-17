@@ -2006,6 +2006,7 @@ dependencies = [
  "bevy_egui",
  "getrandom 0.2.17",
  "rand 0.8.5",
+ "serde_json",
 ]
 
 [[package]]

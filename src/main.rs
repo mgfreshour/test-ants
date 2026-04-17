@@ -10,6 +10,7 @@ use bevy::window::WindowResolution;
 use plugins::simulation::SimulationPlugin;
 use plugins::terrain::TerrainPlugin;
 use plugins::ldtk_maps::LdtkMapsPlugin;
+use plugins::ai_log::AiLogPlugin;
 use plugins::ant_ai::AntAiPlugin;
 use plugins::camera::CameraPlugin;
 use plugins::environment::EnvironmentPlugin;
@@ -62,6 +63,7 @@ fn main() {
             AntSpritePlugin,
             EguiUiPlugin,
             HudPlugin,
+            AiLogPlugin,
         ))
         .run();
 }
