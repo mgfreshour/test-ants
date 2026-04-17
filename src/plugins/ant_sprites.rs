@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::components::ant::{Ant, CarriedItem, Caste, AntState, Movement};
+use crate::components::ant::{Ant, CarriedItem, Caste, AntState, Movement, PlayerControlled};
 use crate::components::terrain::FoodSource;
 use crate::plugins::combat::{Antlion, EnemyColonyNest};
 use crate::plugins::spider_ai::{Spider, SpiderState};
@@ -267,8 +267,13 @@ fn select_sprite_row(
 
 /// Rotate the sprite to face the movement direction.
 /// The spritesheet frames face RIGHT (+X), so angle = atan2(dir.y, dir.x).
+///
+/// Excludes PlayerControlled ants: the player rotates its own transform in
+/// `player_movement` so its facing tracks input/click-to-move directly,
+/// without being overwritten by AI steering systems that mutate
+/// `Movement.direction` (e.g. `fighting_steering`).
 fn orient_sprites(
-    mut query: Query<(&Movement, &mut Transform), With<Ant>>,
+    mut query: Query<(&Movement, &mut Transform), (With<Ant>, Without<PlayerControlled>)>,
 ) {
     for (movement, mut transform) in &mut query {
         let dir = movement.direction;

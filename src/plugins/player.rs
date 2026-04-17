@@ -484,7 +484,7 @@ fn player_movement(
     nest_query: Query<&NestGrid, With<MapMarker>>,
     mut commands: Commands,
     mut query: Query<
-        (Entity, &mut Transform, &Movement, &mut Ant, &MapId,
+        (Entity, &mut Transform, &mut Movement, &mut Ant, &MapId,
          Option<&ClickMoveTarget>, Option<&mut SteeringTarget>),
         With<PlayerControlled>
     >,
@@ -493,7 +493,7 @@ fn player_movement(
         return;
     }
 
-    let Ok((player_entity, mut transform, movement, mut ant, map_id,
+    let Ok((player_entity, mut transform, mut movement, mut ant, map_id,
             click_target, steering_target)) = query.single_mut() else {
         return;
     };
@@ -525,6 +525,8 @@ fn player_movement(
         }
 
         let dir = dir.normalize();
+        movement.direction = dir;
+        transform.rotation = Quat::from_rotation_z(dir.y.atan2(dir.x));
 
         if is_underground {
             // Underground keyboard movement (unchanged)
@@ -588,6 +590,8 @@ fn player_movement(
                             }
                         } else {
                             let move_dir = to_target.normalize();
+                            movement.direction = move_dir;
+                            transform.rotation = Quat::from_rotation_z(move_dir.y.atan2(move_dir.x));
                             let step = move_dir * NEST_PLAYER_SPEED * dt;
                             if step.length() > dist {
                                 transform.translation.x = target_wp.x;
@@ -631,6 +635,8 @@ fn player_movement(
                 // Move toward target
                 let move_dir = to_target.normalize();
                 let step = move_dir * movement.speed * dt;
+                movement.direction = move_dir;
+                transform.rotation = Quat::from_rotation_z(move_dir.y.atan2(move_dir.x));
 
                 if step.length() > dist {
                     transform.translation.x = click.target.x;
