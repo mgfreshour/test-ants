@@ -174,23 +174,48 @@ fn ant_combat_detection(
     }
 
     for (entity, transform, colony, mut ant) in &mut query {
-        if in_combat.contains(&entity) {
-            ant.state = AntState::Defending;
+        let has_nearby_enemy = in_combat.contains(&entity);
+        if has_nearby_enemy {
+            // Stamp dwell timer so a subsequent demote cannot fire before
+            // MIN_STATE_DWELL_SECS elapses.
+            ant.set_state(AntState::Defending, clock.elapsed);
         } else if ant.state == AntState::Defending {
-            // Return to Attacking if AttackRecruit pheromone is present, else Foraging
-            let mut attack_intensity = 0.0f32;
-            if let Some(ref all_grids) = grids {
+            // Look up local alarm + attack-recruit intensities once.
+            let (local_alarm, attack_intensity) = if let Some(ref all_grids) = grids {
                 if let Some(grid) = all_grids.get(colony.colony_id) {
                     let pos = transform.translation.truncate();
                     if let Some((gx, gy)) = grid.world_to_grid(pos) {
-                        attack_intensity = grid.get(gx, gy, PheromoneType::AttackRecruit);
+                        (
+                            grid.get(gx, gy, PheromoneType::Alarm),
+                            grid.get(gx, gy, PheromoneType::AttackRecruit),
+                        )
+                    } else {
+                        (0.0, 0.0)
                     }
+                } else {
+                    (0.0, 0.0)
+                }
+            } else {
+                (0.0, 0.0)
+            };
+
+            let time_in_state = clock.elapsed - ant.state_entered_at;
+            match ant_logic::should_demote_from_defending(
+                true,
+                false, // already filtered by the `else if` — no nearby enemy
+                local_alarm,
+                attack_intensity,
+                0.4,
+                time_in_state,
+            ) {
+                ant_logic::DefendingExit::Stay => {}
+                ant_logic::DefendingExit::Attacking => {
+                    ant.set_state(AntState::Attacking, clock.elapsed);
+                }
+                ant_logic::DefendingExit::Foraging => {
+                    ant.set_state(AntState::Foraging, clock.elapsed);
                 }
             }
-            ant.state = match ant_logic::post_combat_state(attack_intensity, 0.4) {
-                "attacking" => AntState::Attacking,
-                _ => AntState::Foraging,
-            };
         }
     }
 }
@@ -291,10 +316,17 @@ fn alarm_response_steering(
         let fwd = movement.direction;
 
         if let Some((gx, gy)) = grid.world_to_grid(pos) {
-            if grid.get(gx, gy, PheromoneType::Alarm) >= 1.0 {
+            let local_alarm = grid.get(gx, gy, PheromoneType::Alarm);
+            if local_alarm >= ant_logic::ALARM_PROMOTE_THRESHOLD {
                 let alarm_grad = grid.sense_gradient(gx, gy, PheromoneType::Alarm, fwd, ALARM_SENSE_RADIUS);
-                if alarm_grad.length_squared() > 0.5 {
-                    ant.state = AntState::Defending;
+                let time_in_state = clock.elapsed - ant.state_entered_at;
+                if ant_logic::should_promote_to_defending(
+                    true,
+                    local_alarm,
+                    alarm_grad.length_squared(),
+                    time_in_state,
+                ) {
+                    ant.set_state(AntState::Defending, clock.elapsed);
                     *sense = TrailSense::FollowingAlarm;
                     movement.direction = alarm_grad.normalize();
                 }

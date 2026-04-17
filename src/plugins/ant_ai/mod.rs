@@ -76,13 +76,11 @@ fn rebuild_spatial_grid(
 }
 
 fn fix_orphaned_returners(
-    grids: Option<Res<crate::resources::pheromone::ColonyPheromones>>,
-    mut query: Query<(&Transform, &ColonyMember, &mut Ant, &mut PositionHistory), (Without<CarriedItem>, Without<PlayerControlled>)>,
+    mut query: Query<(&mut Ant, &mut PositionHistory), (Without<CarriedItem>, Without<PlayerControlled>)>,
 ) {
     use crate::sim_core::regressions;
-    use crate::components::pheromone::PheromoneType;
 
-    for (transform, colony, mut ant, mut history) in &mut query {
+    for (mut ant, mut history) in &mut query {
         if regressions::should_reset_orphaned_returner(
             ant.state == AntState::Returning,
             false,
@@ -90,26 +88,9 @@ fn fix_orphaned_returners(
             ant.state = AntState::Foraging;
             history.clear();
         }
-        if ant.state == AntState::Defending {
-            let should_reset = if let Some(ref all_grids) = grids {
-                if let Some(grid) = all_grids.get(colony.colony_id) {
-                    let pos = transform.translation.truncate();
-                    if let Some((gx, gy)) = grid.world_to_grid(pos) {
-                        grid.get(gx, gy, PheromoneType::Alarm) < 0.5
-                    } else {
-                        true
-                    }
-                } else {
-                    true
-                }
-            } else {
-                true
-            };
-            if should_reset {
-                ant.state = AntState::Foraging;
-                history.clear();
-            }
-        }
+        // Defending→Foraging is owned exclusively by `ant_combat_detection` in
+        // `plugins/combat.rs`, which has the enemy-proximity context needed to
+        // make that decision without ping-ponging against `alarm_response_steering`.
     }
 }
 

@@ -76,6 +76,23 @@ pub struct Ant {
     pub state: AntState,
     pub age: f32,
     pub hunger: f32,
+    /// `SimClock::elapsed` at which the ant most recently transitioned into
+    /// its current `state`. Used by transition gating (see
+    /// `sim_core::ant_logic::MIN_STATE_DWELL_SECS`) to prevent per-frame
+    /// ping-ponging across alarm-pheromone thresholds.
+    pub state_entered_at: f32,
+}
+
+impl Ant {
+    /// Update `state` and stamp `state_entered_at` when the state actually changes.
+    /// Call sites inside gated transitions (e.g. combat) should use this so the
+    /// dwell timer starts fresh on every real transition.
+    pub fn set_state(&mut self, new_state: AntState, now: f32) {
+        if self.state != new_state {
+            self.state = new_state;
+            self.state_entered_at = now;
+        }
+    }
 }
 
 #[derive(Component)]
@@ -276,6 +293,7 @@ impl Ant {
             state: AntState::Foraging,
             age: 0.0,
             hunger: 0.0,
+            state_entered_at: 0.0,
         }
     }
 
@@ -285,6 +303,7 @@ impl Ant {
             state: AntState::Defending,
             age: 0.0,
             hunger: 0.0,
+            state_entered_at: 0.0,
         }
     }
 }

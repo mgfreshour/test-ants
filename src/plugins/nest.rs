@@ -368,7 +368,7 @@ fn brood_development(
                         },
                         Transform::from_xyz(hatch_pos.x + jitter_x, hatch_pos.y + jitter_y, 2.5),
                         Visibility::Hidden,
-                        Ant { caste, state: AntState::Idle, age: 0.0, hunger: 0.0 },
+                        Ant { caste, state: AntState::Idle, age: 0.0, hunger: 0.0, state_entered_at: 0.0 },
                         AntJob::Unassigned,
                         StimulusThresholds::from_job(AntJob::Unassigned),
                         health,

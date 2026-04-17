@@ -125,6 +125,89 @@ pub fn should_raid(aggression: f32, time_since_last_raid: f32, base_raid_interva
     time_since_last_raid >= interval
 }
 
+// ---------------------------------------------------------------------------
+// Defending <-> Foraging transition: hysteresis band + minimum dwell.
+//
+// Motivation: the alarm pheromone field is noisy (it both decays and diffuses
+// each tick). If the promote and demote thresholds share a value, any ant
+// standing on a cell whose alarm hovers near that value flips state every
+// frame. A hysteresis band plus a short minimum dwell eliminates the flicker
+// without losing responsiveness.
+// ---------------------------------------------------------------------------
+
+/// Alarm pheromone level at or above which a Foraging ant may promote to Defending.
+pub const ALARM_PROMOTE_THRESHOLD: f32 = 1.0;
+
+/// Alarm pheromone level a Defending ant must fall below to demote back to Foraging.
+/// The gap between promote and demote is the hysteresis band.
+pub const ALARM_DEMOTE_THRESHOLD: f32 = 0.3;
+
+/// Minimum time (sim seconds) an ant must spend in a state before another
+/// transition is considered. Kills sub-frame ping-ponging regardless of cause.
+pub const MIN_STATE_DWELL_SECS: f32 = 0.5;
+
+/// Alarm gradient length-squared required to consider the alarm field "directional".
+/// Matches the constant baked into `alarm_response_steering` prior to extraction.
+pub const ALARM_GRADIENT_MIN_LEN_SQ: f32 = 0.5;
+
+/// Decide whether a Foraging ant should promote to Defending.
+pub fn should_promote_to_defending(
+    is_foraging: bool,
+    local_alarm: f32,
+    gradient_len_sq: f32,
+    time_in_state: f32,
+) -> bool {
+    is_foraging
+        && local_alarm >= ALARM_PROMOTE_THRESHOLD
+        && gradient_len_sq > ALARM_GRADIENT_MIN_LEN_SQ
+        && time_in_state >= MIN_STATE_DWELL_SECS
+}
+
+/// Result of evaluating whether a Defending ant should exit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefendingExit {
+    /// Stay Defending.
+    Stay,
+    /// Demote to Foraging.
+    Foraging,
+    /// Promote to Attacking (attack-recruit pheromone is strong).
+    Attacking,
+}
+
+/// Decide whether a Defending ant should leave the Defending state this tick.
+///
+/// The ant stays Defending when:
+/// - an enemy is still nearby (combat takes priority over the alarm field),
+/// - the ant hasn't yet spent `MIN_STATE_DWELL_SECS` in its current state,
+/// - or the local alarm is still in the hysteresis band
+///   (i.e. `alarm >= ALARM_DEMOTE_THRESHOLD`).
+pub fn should_demote_from_defending(
+    is_defending: bool,
+    has_nearby_enemy: bool,
+    local_alarm: f32,
+    attack_recruit: f32,
+    attack_recruit_threshold: f32,
+    time_in_state: f32,
+) -> DefendingExit {
+    if !is_defending {
+        return DefendingExit::Stay;
+    }
+    if has_nearby_enemy {
+        return DefendingExit::Stay;
+    }
+    if time_in_state < MIN_STATE_DWELL_SECS {
+        return DefendingExit::Stay;
+    }
+    if local_alarm >= ALARM_DEMOTE_THRESHOLD {
+        return DefendingExit::Stay;
+    }
+    if attack_recruit >= attack_recruit_threshold {
+        DefendingExit::Attacking
+    } else {
+        DefendingExit::Foraging
+    }
+}
+
 pub fn apply_boundary_bounce(pos: Vec2, dir: Vec2, min: Vec2, max: Vec2) -> (Vec2, Vec2) {
     let mut next_pos = pos;
     let mut next_dir = dir;
@@ -311,5 +394,128 @@ mod tests {
             assert!(picked >= 0.0);
             assert!(picked <= 5.0);
         }
+    }
+
+    // --- Defending <-> Foraging hysteresis + dwell ---
+
+    #[test]
+    fn promote_requires_alarm_at_or_above_threshold() {
+        let dwell = MIN_STATE_DWELL_SECS + 1.0;
+        assert!(!should_promote_to_defending(true, 0.9, 1.0, dwell));
+        assert!(should_promote_to_defending(true, 1.0, 1.0, dwell));
+        assert!(should_promote_to_defending(true, 2.0, 1.0, dwell));
+    }
+
+    #[test]
+    fn promote_requires_directional_gradient() {
+        let dwell = MIN_STATE_DWELL_SECS + 1.0;
+        assert!(!should_promote_to_defending(true, 5.0, 0.1, dwell));
+        assert!(should_promote_to_defending(true, 5.0, ALARM_GRADIENT_MIN_LEN_SQ + 0.01, dwell));
+    }
+
+    #[test]
+    fn promote_requires_min_dwell() {
+        assert!(!should_promote_to_defending(true, 5.0, 1.0, 0.1));
+        assert!(should_promote_to_defending(true, 5.0, 1.0, MIN_STATE_DWELL_SECS));
+    }
+
+    #[test]
+    fn promote_skipped_when_not_foraging() {
+        assert!(!should_promote_to_defending(false, 5.0, 1.0, 10.0));
+    }
+
+    #[test]
+    fn demote_blocked_by_nearby_enemy() {
+        // Even with low alarm and long dwell, a nearby enemy pins the ant in Defending.
+        let result = should_demote_from_defending(true, true, 0.0, 0.0, 0.4, 10.0);
+        assert_eq!(result, DefendingExit::Stay);
+    }
+
+    #[test]
+    fn demote_hysteresis_band_keeps_state_stable() {
+        let dwell = MIN_STATE_DWELL_SECS + 1.0;
+        // At the demote threshold: still inside band, stay.
+        assert_eq!(
+            should_demote_from_defending(true, false, ALARM_DEMOTE_THRESHOLD, 0.0, 0.4, dwell),
+            DefendingExit::Stay
+        );
+        // Just below: demote fires.
+        assert_eq!(
+            should_demote_from_defending(true, false, ALARM_DEMOTE_THRESHOLD - 0.01, 0.0, 0.4, dwell),
+            DefendingExit::Foraging
+        );
+    }
+
+    #[test]
+    fn demote_routes_to_attacking_when_recruit_signal_strong() {
+        let dwell = MIN_STATE_DWELL_SECS + 1.0;
+        assert_eq!(
+            should_demote_from_defending(true, false, 0.0, 0.5, 0.4, dwell),
+            DefendingExit::Attacking
+        );
+        // Below recruit threshold → Foraging.
+        assert_eq!(
+            should_demote_from_defending(true, false, 0.0, 0.39, 0.4, dwell),
+            DefendingExit::Foraging
+        );
+    }
+
+    #[test]
+    fn demote_requires_min_dwell() {
+        assert_eq!(
+            should_demote_from_defending(true, false, 0.0, 0.0, 0.4, 0.1),
+            DefendingExit::Stay
+        );
+    }
+
+    #[test]
+    fn demote_skipped_when_not_defending() {
+        assert_eq!(
+            should_demote_from_defending(false, false, 0.0, 0.0, 0.4, 10.0),
+            DefendingExit::Stay
+        );
+    }
+
+    /// Regression test for the Foraging <-> Defending flicker bug. Simulates 60
+    /// frames at 60 fps where the alarm field oscillates across the old single
+    /// 0.5 threshold. With hysteresis + dwell in place the state changes at
+    /// most twice (one promote + one demote) across the full second.
+    #[test]
+    fn no_flip_within_dwell_even_under_noise() {
+        let mut is_foraging = true;
+        let mut is_defending = false;
+        let mut time_in_state = MIN_STATE_DWELL_SECS + 1.0; // start cleanly dwelled
+        let dt = 1.0 / 60.0;
+        let mut transitions = 0u32;
+
+        for frame in 0..60 {
+            // Oscillate alarm between 0.4 and 0.6 every 2 frames (above promote
+            // threshold in spikes, below demote threshold in troughs).
+            let alarm = if frame % 2 == 0 { 0.4 } else { 1.2 };
+
+            if is_foraging && should_promote_to_defending(true, alarm, 1.0, time_in_state) {
+                is_foraging = false;
+                is_defending = true;
+                time_in_state = 0.0;
+                transitions += 1;
+            } else if is_defending {
+                match should_demote_from_defending(true, false, alarm, 0.0, 0.4, time_in_state) {
+                    DefendingExit::Foraging => {
+                        is_defending = false;
+                        is_foraging = true;
+                        time_in_state = 0.0;
+                        transitions += 1;
+                    }
+                    DefendingExit::Attacking | DefendingExit::Stay => {}
+                }
+            }
+
+            time_in_state += dt;
+        }
+
+        assert!(
+            transitions <= 2,
+            "expected <= 2 transitions across 60 oscillating frames, got {transitions}"
+        );
     }
 }

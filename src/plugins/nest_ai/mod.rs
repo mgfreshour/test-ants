@@ -235,6 +235,7 @@ fn spawn_initial_nest_ants(
                     state: AntState::Idle,
                     age,
                     hunger: 0.0,
+                    state_entered_at: 0.0,
                 },
                 job,
                 StimulusThresholds::from_job(job),
