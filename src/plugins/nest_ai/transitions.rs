@@ -160,7 +160,7 @@ pub(super) fn portal_transition(
     registry: Res<MapRegistry>,
     portal_query: Query<&MapPortal>,
     mut ant_query: Query<
-        (Entity, &mut Transform, &mut Ant, &ColonyMember, &mut MapId, &mut Visibility, Option<&NestTask>, &AntJob, Option<&PortalCooldown>),
+        (Entity, &mut Transform, &mut Ant, &ColonyMember, &MapId, &mut Visibility, Option<&NestTask>, &AntJob, Option<&PortalCooldown>),
         Without<PlayerControlled>,
     >,
     mut commands: Commands,
@@ -186,7 +186,7 @@ pub(super) fn portal_transition(
 
     let mut rng = rand::thread_rng();
 
-    for (entity, mut transform, mut ant, colony, mut map_id, mut vis, _, job, cooldown) in &mut ant_query {
+    for (entity, mut transform, mut ant, colony, map_id, mut vis, _, job, cooldown) in &mut ant_query {
         // Skip ants with active portal cooldown.
         if cooldown.is_some() {
             continue;
@@ -230,11 +230,13 @@ pub(super) fn portal_transition(
                 }
 
                 ant.state = if is_following { AntState::Following } else { AntState::Idle };
-                map_id.0 = portal.target_map;
                 transform.translation.x = portal.target_position.x;
                 transform.translation.y = portal.target_position.y;
                 *vis = Visibility::Hidden;
+                // MapId applied via commands so it lands in the same flush as the
+                // NestTask/StimulusThresholds inserts.
                 commands.entity(entity).insert((
+                    MapId(portal.target_map),
                     NestTask::Wander { scan_timer: 0.0, wander_time: 0.0 },
                     StimulusThresholds::from_job(*job),
                     PortalCooldown::new(),
@@ -242,13 +244,15 @@ pub(super) fn portal_transition(
             } else {
                 if ant.state == AntState::Following {
                     ant.state = AntState::Following;
-                    map_id.0 = portal.target_map;
                     transform.translation.x = portal.target_position.x + rng.gen_range(-15.0..15.0f32);
                     transform.translation.y = portal.target_position.y + rng.gen_range(-15.0..15.0f32);
                     *vis = Visibility::Inherited;
-                    commands.entity(entity).remove::<NestTask>();
-                    commands.entity(entity).remove::<NestPath>();
-                    commands.entity(entity).insert(PortalCooldown::new());
+                    commands
+                        .entity(entity)
+                        .insert(MapId(portal.target_map))
+                        .remove::<NestTask>()
+                        .remove::<NestPath>()
+                        .insert(PortalCooldown::new());
                 }
             }
             break;
@@ -266,7 +270,7 @@ pub(super) fn nest_to_surface_transition(
     portal_query: Query<&MapPortal>,
     mut commands: Commands,
     mut query: Query<
-        (Entity, &mut Transform, &mut Ant, &mut NestTask, &mut MapId, &mut Visibility, &AntJob, &mut Movement, &mut PositionHistory),
+        (Entity, &mut Transform, &mut Ant, &mut NestTask, &MapId, &mut Visibility, &AntJob, &mut Movement, &mut PositionHistory),
     >,
 ) {
     if clock.speed == SimSpeed::Paused {
@@ -276,7 +280,7 @@ pub(super) fn nest_to_surface_transition(
     let dt = time.delta_secs() * clock.speed.multiplier();
     let mut rng = rand::thread_rng();
 
-    for (entity, mut transform, mut ant, mut task, mut map_id, mut vis, job, mut movement, mut history) in &mut query {
+    for (entity, mut transform, mut ant, mut task, map_id, mut vis, job, mut movement, mut history) in &mut query {
         // Only process ants currently in a nest.
         if map_id.0 == registry.surface {
             continue;
@@ -306,7 +310,6 @@ pub(super) fn nest_to_surface_transition(
                 };
 
                 ant.state = AntState::Foraging;
-                map_id.0 = registry.surface;
                 transform.translation.x = surface_pos.x + rng.gen_range(-15.0..15.0);
                 transform.translation.y = surface_pos.y + rng.gen_range(-15.0..15.0);
                 // Visibility will be corrected by sync_map_visibility.
@@ -318,8 +321,13 @@ pub(super) fn nest_to_surface_transition(
                 movement.speed = config.ant_speed_worker;
                 history.clear();
 
+                // Apply MapId via commands so it lands in the same command-flush as
+                // the NestTask removal. This closes the same-frame inconsistency window
+                // that otherwise lets observers see `on_surface=true` while a stale
+                // `NestTask` is still attached.
                 commands
                     .entity(entity)
+                    .insert(MapId(registry.surface))
                     .remove::<NestTask>()
                     .remove::<NestPath>()
                     .insert(PortalCooldown::new());

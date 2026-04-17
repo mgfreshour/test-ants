@@ -265,7 +265,7 @@ fn player_portal_transition(
         (With<PlayerControlled>, Without<MainCamera>),
     >,
     mut follower_query: Query<
-        (Entity, &mut Transform, &mut Ant, &mut MapId, &mut Visibility),
+        (Entity, &mut Transform, &mut Ant, &MapId, &mut Visibility),
         (Without<PlayerControlled>, Without<MainCamera>),
     >,
 ) {
@@ -318,7 +318,7 @@ fn player_portal_transition(
     // Transition followers near the portal.
     let follower_range = PORTAL_RANGE * 3.0;
     let mut rng = rand::thread_rng();
-    for (entity, mut tf, mut ant, mut map_id, mut vis) in &mut follower_query {
+    for (entity, mut tf, mut ant, map_id, mut vis) in &mut follower_query {
         if ant.state != AntState::Following || map_id.0 != active.entity {
             continue;
         }
@@ -327,23 +327,28 @@ fn player_portal_transition(
             continue;
         }
 
-        map_id.0 = target_map;
         let jitter_x = rng.gen_range(-12.0..12.0f32);
         let jitter_y = rng.gen_range(-12.0..12.0f32);
         tf.translation.x = target_pos.x + jitter_x;
         tf.translation.y = target_pos.y + jitter_y;
         *vis = Visibility::Hidden;
 
+        // MapId applied via commands so it lands in the same flush as the
+        // NestTask insert/remove, avoiding a same-frame inconsistency window.
         if entering_nest {
             commands.entity(entity).insert((
+                MapId(target_map),
                 NestTask::Wander { scan_timer: 0.0, wander_time: 0.0 },
                 PortalCooldown::new(),
             ));
             ant.state = AntState::Following;
         } else {
-            commands.entity(entity).remove::<NestTask>();
-            commands.entity(entity).remove::<NestPath>();
-            commands.entity(entity).insert(PortalCooldown::new());
+            commands
+                .entity(entity)
+                .insert(MapId(target_map))
+                .remove::<NestTask>()
+                .remove::<NestPath>()
+                .insert(PortalCooldown::new());
             ant.state = AntState::Following;
         }
     }
