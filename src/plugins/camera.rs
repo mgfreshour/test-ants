@@ -1,5 +1,8 @@
+use std::collections::HashSet;
+
 use bevy::prelude::*;
 use bevy::input::mouse::MouseWheel;
+use bevy_ecs_tilemap::prelude::TileStorage;
 
 use crate::components::map::MapKind;
 use crate::plugins::player::PlayerMode;
@@ -11,11 +14,13 @@ pub struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_camera)
+        app.init_resource::<ZClipWarnings>()
+            .add_systems(Startup, setup_camera)
             .add_systems(
                 Update,
                 (camera_pan, camera_zoom, camera_clamp).chain(),
-            );
+            )
+            .add_systems(Update, warn_on_z_clip);
     }
 }
 
@@ -31,6 +36,8 @@ fn setup_camera(mut commands: Commands, config: Res<SimConfig>) {
         Transform::from_xyz(center_x, center_y, 999.0),
         Projection::from(OrthographicProjection {
             scale: 1.0,
+            near: -1000.0,
+            far: 2000.0,
             ..OrthographicProjection::default_2d()
         }),
         MainCamera,
@@ -95,6 +102,62 @@ fn camera_zoom(
             let zoom_delta = -event.y * ZOOM_SPEED;
             ortho.scale = (ortho.scale + zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
         }
+    }
+}
+
+/// Tracks which entities we've already warned about so we don't spam the log
+/// every frame for persistent violations.
+#[derive(Resource, Default)]
+struct ZClipWarnings {
+    warned: HashSet<Entity>,
+}
+
+/// Warns when any renderable entity's global-space z falls outside the main
+/// camera's orthographic frustum. In a 2D game every visible object should sit
+/// inside the camera's z range; anything outside will silently not render.
+///
+/// Checked entity kinds: sprites and tilemap storages (the two rendering
+/// primitives we use). Each offending entity is logged once.
+fn warn_on_z_clip(
+    camera: Query<(&Transform, &Projection), With<MainCamera>>,
+    sprites: Query<(Entity, &GlobalTransform, Option<&Name>), With<Sprite>>,
+    tilemaps: Query<(Entity, &GlobalTransform, Option<&Name>), With<TileStorage>>,
+    mut warnings: ResMut<ZClipWarnings>,
+) {
+    let Ok((cam_tf, projection)) = camera.single() else {
+        return;
+    };
+    let Projection::Orthographic(ref ortho) = projection else {
+        return;
+    };
+
+    // For a 2D orthographic camera looking down -Z, the visible world-space z
+    // range is [camera.z - far, camera.z - near].
+    let cam_z = cam_tf.translation.z;
+    let z_min = cam_z - ortho.far;
+    let z_max = cam_z - ortho.near;
+
+    let mut check = |entity: Entity, gtf: &GlobalTransform, name: Option<&Name>, kind: &str| {
+        let z = gtf.translation().z;
+        if z < z_min || z > z_max {
+            if warnings.warned.insert(entity) {
+                let label = name
+                    .map(|n| n.as_str().to_string())
+                    .unwrap_or_else(|| format!("{entity:?}"));
+                warn!(
+                    "{} '{}' at z={:.3} is outside camera z range [{:.3}, {:.3}] \
+                     (camera.z={:.3}, near={:.3}, far={:.3}). It will not render.",
+                    kind, label, z, z_min, z_max, cam_z, ortho.near, ortho.far
+                );
+            }
+        }
+    };
+
+    for (entity, gtf, name) in &sprites {
+        check(entity, gtf, name, "Sprite");
+    }
+    for (entity, gtf, name) in &tilemaps {
+        check(entity, gtf, name, "Tilemap");
     }
 }
 
