@@ -68,12 +68,12 @@ fn spawn_ldtk_world(
     asset_server: Res<AssetServer>,
     registry: Res<MapRegistry>,
 ) {
-    // Surface
+    // Surface — z=-10 so tilemap layers render behind all game sprites.
     commands.spawn((
         LdtkWorldBundle {
             ldtk_handle: asset_server.load("maps/colony.ldtk").into(),
             level_set: LevelSet::from_iids(["9590239f-aaf8-463e-a9d3-2a54c2d23d3a"]),
-            transform: Transform::default(),
+            transform: Transform::from_xyz(0.0, 0.0, -10.0),
             ..default()
         },
         MapId(registry.surface),
@@ -85,7 +85,7 @@ fn spawn_ldtk_world(
     let nest_offset = Vec3::new(
         -(NEST_WIDTH as f32 * NEST_CELL_SIZE) / 2.0,
         -(NEST_HEIGHT as f32 * NEST_CELL_SIZE) / 2.0,
-        0.0,
+        -10.0,
     );
 
     // Player nest
