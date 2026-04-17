@@ -26,7 +26,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use bevy::prelude::*;
 use serde_json::{json, Value};
 
-use crate::components::ant::{Ant, AntJob, AntState, CarriedItem};
+use crate::components::ant::{Ant, AntJob, AntState, CarriedItem, CombatTarget};
 use crate::components::map::MapId;
 use crate::components::nest::NestTask;
 use crate::resources::active_map::MapRegistry;
@@ -191,6 +191,7 @@ fn snapshot_for(
     carrying: bool,
     on_surface: bool,
     nest_task: Option<&NestTask>,
+    target: Option<&CombatTarget>,
 ) -> AntSnapshot {
     // Surface ants never execute a nest task; suppress any leaked NestTask
     // component from the snapshot so transition diffs and thrash detection
@@ -206,6 +207,7 @@ fn snapshot_for(
         carrying,
         on_surface,
         nest_task: nest_task_label,
+        target: target.map(|t| t.entity.index_u32()),
     }
 }
 
@@ -216,6 +218,7 @@ fn snapshot_to_json(s: &AntSnapshot) -> Value {
         "carrying": s.carrying,
         "on_surface": s.on_surface,
         "nest_task": s.nest_task,
+        "target": s.target,
     })
 }
 
@@ -244,6 +247,7 @@ fn sample_ai_trace(
         Option<&AntJob>,
         Option<&CarriedItem>,
         Option<&NestTask>,
+        Option<&CombatTarget>,
         &MapId,
         &mut AiLogState,
         &mut AiTrace,
@@ -254,7 +258,7 @@ fn sample_ai_trace(
     }
     let surface_entity = registry.as_ref().map(|r| r.surface);
 
-    for (tf, ant, job_opt, carried, nest_task, map_id, mut log_state, mut trace) in &mut query {
+    for (tf, ant, job_opt, carried, nest_task, target, map_id, mut log_state, mut trace) in &mut query {
         log_state.frames_since_sample = log_state.frames_since_sample.saturating_add(1);
         if log_state.frames_since_sample < TRACE_SAMPLE_EVERY_N_FRAMES {
             continue;
@@ -268,6 +272,7 @@ fn sample_ai_trace(
             carried.is_some(),
             on_surface,
             nest_task,
+            target,
         );
 
         trace.push(TraceFrame {
@@ -291,6 +296,7 @@ fn detect_ai_transitions(
         Option<&AntJob>,
         Option<&CarriedItem>,
         Option<&NestTask>,
+        Option<&CombatTarget>,
         &MapId,
         &mut AiLogState,
     )>,
@@ -300,7 +306,7 @@ fn detect_ai_transitions(
     }
     let surface_entity = registry.as_ref().map(|r| r.surface);
 
-    for (entity, tf, ant, job_opt, carried, nest_task, map_id, mut log_state) in &mut query {
+    for (entity, tf, ant, job_opt, carried, nest_task, target, map_id, mut log_state) in &mut query {
         let on_surface = surface_entity.map_or(true, |s| map_id.0 == s);
         let curr = snapshot_for(
             ant.state,
@@ -308,6 +314,7 @@ fn detect_ai_transitions(
             carried.is_some(),
             on_surface,
             nest_task,
+            target,
         );
 
         match log_state.prev {

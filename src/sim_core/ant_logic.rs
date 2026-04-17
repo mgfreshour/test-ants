@@ -151,16 +151,72 @@ pub const MIN_STATE_DWELL_SECS: f32 = 0.5;
 pub const ALARM_GRADIENT_MIN_LEN_SQ: f32 = 0.5;
 
 /// Decide whether a Foraging ant should promote to Defending.
+///
+/// `promote_threshold` lets callers plug in a runtime-configurable gate
+/// (e.g. the player-side `AggressionSettings.alarm_threshold`). Callers that
+/// want the original static behavior should pass `ALARM_PROMOTE_THRESHOLD`.
 pub fn should_promote_to_defending(
     is_foraging: bool,
     local_alarm: f32,
     gradient_len_sq: f32,
     time_in_state: f32,
+    promote_threshold: f32,
 ) -> bool {
     is_foraging
-        && local_alarm >= ALARM_PROMOTE_THRESHOLD
+        && local_alarm >= promote_threshold
         && gradient_len_sq > ALARM_GRADIENT_MIN_LEN_SQ
         && time_in_state >= MIN_STATE_DWELL_SECS
+}
+
+/// Nearest hostile within `engage_range` of `self_pos`, skipping same-colony
+/// entries. Returns the winning entity or `None`. Pure, so it can be unit
+/// tested without ECS scaffolding.
+///
+/// Tie-break on equal distances: the first entry in `others` wins (input
+/// order stable), which matches ECS query iteration order in practice.
+pub fn select_combat_target(
+    self_pos: Vec2,
+    self_colony: u32,
+    others: &[(u32, Vec2, u32)], // (stable id, pos, colony)
+    engage_range: f32,
+) -> Option<u32> {
+    let range_sq = engage_range * engage_range;
+    let mut best: Option<(u32, f32)> = None;
+    for (id, pos, colony) in others.iter().copied() {
+        if colony == self_colony {
+            continue;
+        }
+        let d_sq = self_pos.distance_squared(pos);
+        if d_sq > range_sq {
+            continue;
+        }
+        match best {
+            Some((_, bd)) if d_sq >= bd => {}
+            _ => best = Some((id, d_sq)),
+        }
+    }
+    best.map(|(id, _)| id)
+}
+
+/// Whether a committed engagement should be dropped. Today the rule is
+/// simply "drop when the target is gone". Centralizing it documents intent
+/// and gives a single test point if we later add leash/timeout logic.
+pub fn should_drop_target(target_alive: bool) -> bool {
+    !target_alive
+}
+
+/// Upper bound for aggression-scaled engagement range. Keeps targeting sane
+/// even if callers pass an out-of-band aggression value.
+pub const ENGAGEMENT_RANGE_MAX_SCALE: f32 = 2.0;
+
+/// Scale a base engagement radius by an aggression value in `[0.0, 1.0]`.
+/// At `aggression = 0.0` the range is unchanged; at `1.0` it doubles.
+/// Values outside that band are clamped so callers can pass the raw
+/// `RedColonyStrategy.aggression` without pre-clamping.
+pub fn engagement_range(base: f32, aggression: f32) -> f32 {
+    let a = aggression.clamp(0.0, 1.0);
+    let scale = (1.0 + a).min(ENGAGEMENT_RANGE_MAX_SCALE);
+    base * scale
 }
 
 /// Result of evaluating whether a Defending ant should exit.
@@ -401,27 +457,84 @@ mod tests {
     #[test]
     fn promote_requires_alarm_at_or_above_threshold() {
         let dwell = MIN_STATE_DWELL_SECS + 1.0;
-        assert!(!should_promote_to_defending(true, 0.9, 1.0, dwell));
-        assert!(should_promote_to_defending(true, 1.0, 1.0, dwell));
-        assert!(should_promote_to_defending(true, 2.0, 1.0, dwell));
+        let th = ALARM_PROMOTE_THRESHOLD;
+        assert!(!should_promote_to_defending(true, 0.9, 1.0, dwell, th));
+        assert!(should_promote_to_defending(true, 1.0, 1.0, dwell, th));
+        assert!(should_promote_to_defending(true, 2.0, 1.0, dwell, th));
+    }
+
+    #[test]
+    fn promote_honors_parameterized_threshold() {
+        let dwell = MIN_STATE_DWELL_SECS + 1.0;
+        // Slider dialed down: 0.7 alarm should promote.
+        assert!(should_promote_to_defending(true, 0.7, 1.0, dwell, 0.5));
+        // Slider dialed up: same 0.7 alarm should not.
+        assert!(!should_promote_to_defending(true, 0.7, 1.0, dwell, 2.0));
     }
 
     #[test]
     fn promote_requires_directional_gradient() {
         let dwell = MIN_STATE_DWELL_SECS + 1.0;
-        assert!(!should_promote_to_defending(true, 5.0, 0.1, dwell));
-        assert!(should_promote_to_defending(true, 5.0, ALARM_GRADIENT_MIN_LEN_SQ + 0.01, dwell));
+        let th = ALARM_PROMOTE_THRESHOLD;
+        assert!(!should_promote_to_defending(true, 5.0, 0.1, dwell, th));
+        assert!(should_promote_to_defending(true, 5.0, ALARM_GRADIENT_MIN_LEN_SQ + 0.01, dwell, th));
     }
 
     #[test]
     fn promote_requires_min_dwell() {
-        assert!(!should_promote_to_defending(true, 5.0, 1.0, 0.1));
-        assert!(should_promote_to_defending(true, 5.0, 1.0, MIN_STATE_DWELL_SECS));
+        let th = ALARM_PROMOTE_THRESHOLD;
+        assert!(!should_promote_to_defending(true, 5.0, 1.0, 0.1, th));
+        assert!(should_promote_to_defending(true, 5.0, 1.0, MIN_STATE_DWELL_SECS, th));
     }
 
     #[test]
     fn promote_skipped_when_not_foraging() {
-        assert!(!should_promote_to_defending(false, 5.0, 1.0, 10.0));
+        assert!(!should_promote_to_defending(false, 5.0, 1.0, 10.0, ALARM_PROMOTE_THRESHOLD));
+    }
+
+    #[test]
+    fn select_combat_target_returns_none_when_empty_or_same_colony() {
+        let me = Vec2::new(0.0, 0.0);
+        assert_eq!(select_combat_target(me, 0, &[], 10.0), None);
+        // All same colony.
+        let same = [(1, Vec2::new(1.0, 0.0), 0), (2, Vec2::new(2.0, 0.0), 0)];
+        assert_eq!(select_combat_target(me, 0, &same, 10.0), None);
+    }
+
+    #[test]
+    fn select_combat_target_picks_nearest_hostile_in_range() {
+        let me = Vec2::new(0.0, 0.0);
+        let others = [
+            (10, Vec2::new(5.0, 0.0), 1),   // hostile, 5 away
+            (11, Vec2::new(2.0, 0.0), 1),   // hostile, 2 away — winner
+            (12, Vec2::new(1.0, 0.0), 0),   // friendly, ignored
+            (13, Vec2::new(100.0, 0.0), 1), // hostile but far
+        ];
+        assert_eq!(select_combat_target(me, 0, &others, 10.0), Some(11));
+    }
+
+    #[test]
+    fn select_combat_target_respects_range() {
+        let me = Vec2::new(0.0, 0.0);
+        let others = [(10, Vec2::new(8.0, 0.0), 1)];
+        assert_eq!(select_combat_target(me, 0, &others, 5.0), None);
+        assert_eq!(select_combat_target(me, 0, &others, 10.0), Some(10));
+    }
+
+    #[test]
+    fn should_drop_target_only_when_dead() {
+        assert!(!should_drop_target(true));
+        assert!(should_drop_target(false));
+    }
+
+    #[test]
+    fn engagement_range_scales_with_aggression() {
+        assert_eq!(engagement_range(15.0, 0.0), 15.0);
+        assert_eq!(engagement_range(15.0, 0.5), 22.5);
+        assert_eq!(engagement_range(15.0, 1.0), 30.0);
+        // Clamp: out-of-band aggression does not blow past 2x.
+        assert_eq!(engagement_range(15.0, 5.0), 30.0);
+        assert_eq!(engagement_range(15.0, -1.0), 15.0);
     }
 
     #[test]
@@ -493,7 +606,7 @@ mod tests {
             // threshold in spikes, below demote threshold in troughs).
             let alarm = if frame % 2 == 0 { 0.4 } else { 1.2 };
 
-            if is_foraging && should_promote_to_defending(true, alarm, 1.0, time_in_state) {
+            if is_foraging && should_promote_to_defending(true, alarm, 1.0, time_in_state, ALARM_PROMOTE_THRESHOLD) {
                 is_foraging = false;
                 is_defending = true;
                 time_in_state = 0.0;

@@ -23,6 +23,10 @@ pub struct AntSnapshot {
     pub on_surface: bool,
     /// Short label for the current nest task, if any (e.g. "W", "D", "H").
     pub nest_task: Option<&'static str>,
+    /// Entity index of the committed combat target, when the ant is
+    /// `Fighting`. `None` otherwise. Included so log readers can verify
+    /// target-lock is stable across frames and confirm Fighting dwell.
+    pub target: Option<u32>,
 }
 
 /// Difference between two snapshots, if any field changed.
@@ -124,6 +128,7 @@ mod tests {
             carrying: false,
             on_surface: true,
             nest_task: None,
+            target: None,
         }
     }
 

@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use rand::Rng;
 
 use crate::components::ant::{
-    Ant, AntState, CarriedItem, ColonyMember, DamageSource, Health, Movement, PlayerControlled,
-    PositionHistory, TrailSense,
+    Ant, AntState, CarriedItem, CombatTarget, ColonyMember, DamageSource, Health, Movement,
+    PlayerControlled, PositionHistory, TargetKind, TrailSense,
 };
 use crate::components::map::MapId;
 use crate::components::pheromone::PheromoneType;
@@ -83,8 +83,10 @@ impl Plugin for CombatPlugin {
                 Update,
                 (
                     red_colony_strategy_update,
-                    ant_combat_detection,
-                    combat_resolution,
+                    counter_attack_on_damage,
+                    combat_target_selection,
+                    fighting_steering,
+                    fighting_apply_damage,
                     alarm_pheromone_deposit,
                     alarm_response_steering,
                     antlion_ai,
@@ -145,86 +147,254 @@ fn spawn_red_colony(mut commands: Commands, config: Res<SimConfig>, registry: Re
     }
 }
 
-fn ant_combat_detection(
+/// Assign a `CombatTarget` to any ant whose nearest hostile (ant or spider)
+/// is within engagement range, and transition it to `AntState::Fighting`.
+///
+/// Engagement range is base `COMBAT_RANGE` for the player colony and
+/// `engagement_range(COMBAT_RANGE, red_strategy.aggression)` for the red
+/// colony, so late-game red raids are more proactive about committing.
+///
+/// Ants that were `Defending` but no longer have any enemy in their sensing
+/// range demote back to `Foraging` via the existing hysteresis helpers; the
+/// `Attacking` demote branch is intentionally suppressed here (recruit-based
+/// `Attacking` still enters via `foraging.rs`).
+fn combat_target_selection(
+    mut commands: Commands,
     clock: Res<SimClock>,
     grids: Option<Res<ColonyPheromones>>,
-    mut query: Query<(Entity, &Transform, &ColonyMember, &mut Ant)>,
+    red_strategy: Res<RedColonyStrategy>,
+    spider_query: Query<(Entity, &Transform, &MapId), With<Spider>>,
+    mut ant_query: Query<
+        (Entity, &Transform, &ColonyMember, &MapId, &mut Ant, Option<&CombatTarget>),
+        With<Health>,
+    >,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
     }
 
-    let snapshot: Vec<(Entity, Vec2, u32)> = query
+    // Build a flat list of potential hostile contacts. Ants carry colony
+    // identity; spiders are treated as "colony = SPIDER_COLONY" so the pure
+    // helper rejects same-colony entries consistently.
+    //
+    // We also filter by MapId so ants in the blue nest can't engage ants in
+    // the red nest (their world coords overlap but they're on separate maps).
+    const SPIDER_COLONY: u32 = u32::MAX;
+    let ant_snapshot: Vec<(u32, Vec2, u32, Entity)> = ant_query
         .iter()
-        .map(|(e, t, c, _)| (e, t.translation.truncate(), c.colony_id))
+        .map(|(e, t, c, m, _, _)| (e.index_u32(), t.translation.truncate(), c.colony_id, m.0))
+        .collect();
+    let spider_snapshot: Vec<(u32, Vec2, u32, Entity)> = spider_query
+        .iter()
+        .map(|(e, t, m)| (e.index_u32(), t.translation.truncate(), SPIDER_COLONY, m.0))
         .collect();
 
-    let mut in_combat: Vec<Entity> = Vec::new();
-
-    for i in 0..snapshot.len() {
-        for j in 0..snapshot.len() {
-            if i == j || snapshot[i].2 == snapshot[j].2 {
-                continue;
-            }
-            if snapshot[i].1.distance(snapshot[j].1) < COMBAT_RANGE {
-                in_combat.push(snapshot[i].0);
-                break;
-            }
-        }
+    // Index -> Entity lookup for the result of the pure helper.
+    let mut entity_by_index: std::collections::HashMap<u32, (Entity, TargetKind)> =
+        std::collections::HashMap::new();
+    for (e, _, _, _, _, _) in ant_query.iter() {
+        entity_by_index.insert(e.index_u32(), (e, TargetKind::Ant));
+    }
+    for (e, _, _) in spider_query.iter() {
+        entity_by_index.insert(e.index_u32(), (e, TargetKind::Spider));
     }
 
-    for (entity, transform, colony, mut ant) in &mut query {
-        let has_nearby_enemy = in_combat.contains(&entity);
-        if has_nearby_enemy {
-            // Stamp dwell timer so a subsequent demote cannot fire before
-            // MIN_STATE_DWELL_SECS elapses.
-            ant.set_state(AntState::Defending, clock.elapsed);
-        } else if ant.state == AntState::Defending {
-            // Look up local alarm + attack-recruit intensities once.
-            let (local_alarm, attack_intensity) = if let Some(ref all_grids) = grids {
-                if let Some(grid) = all_grids.get(colony.colony_id) {
-                    let pos = transform.translation.truncate();
-                    if let Some((gx, gy)) = grid.world_to_grid(pos) {
-                        (
-                            grid.get(gx, gy, PheromoneType::Alarm),
-                            grid.get(gx, gy, PheromoneType::AttackRecruit),
-                        )
+    let red_engage = ant_logic::engagement_range(COMBAT_RANGE, red_strategy.aggression);
+
+    for (entity, transform, colony, self_map, mut ant, current_target) in &mut ant_query {
+        let pos = transform.translation.truncate();
+        let engage = if colony.colony_id == RED_COLONY_ID {
+            red_engage
+        } else {
+            COMBAT_RANGE
+        };
+
+        // Merge ant + spider snapshots, excluding self and entries on a
+        // different map.
+        let mut candidates: Vec<(u32, Vec2, u32)> =
+            Vec::with_capacity(ant_snapshot.len() + spider_snapshot.len());
+        for &(id, p, cid, map) in &ant_snapshot {
+            if id != entity.index_u32() && map == self_map.0 {
+                candidates.push((id, p, cid));
+            }
+        }
+        for &(id, p, cid, map) in &spider_snapshot {
+            if map == self_map.0 {
+                candidates.push((id, p, cid));
+            }
+        }
+
+        let picked = ant_logic::select_combat_target(pos, colony.colony_id, &candidates, engage);
+
+        match (picked, current_target.is_some()) {
+            (Some(target_idx), false) => {
+                // Newly engaging: commit to the target and enter Fighting.
+                if let Some(&(target_entity, kind)) = entity_by_index.get(&target_idx) {
+                    commands.entity(entity).insert(CombatTarget { entity: target_entity, kind });
+                    ant.set_state(AntState::Fighting, clock.elapsed);
+                }
+            }
+            (Some(_), true) => {
+                // Already engaged — do not retarget mid-fight (commitment
+                // rule 2b). fighting_apply_damage drops the target when it
+                // dies.
+            }
+            (None, true) => {
+                // No enemy in range, but we're still committed. Leave
+                // CombatTarget in place; fighting_apply_damage will verify
+                // the target still exists next frame. This path matters when
+                // the target is temporarily outside engage range — the
+                // steering system will close the gap.
+            }
+            (None, false) => {
+                // No target, no commitment. Handle stale Defending demote so
+                // ants that sensed alarm but never found a target can return
+                // to Foraging.
+                if ant.state == AntState::Defending {
+                    let (local_alarm, attack_intensity) = if let Some(ref all_grids) = grids {
+                        if let Some(grid) = all_grids.get(colony.colony_id) {
+                            if let Some((gx, gy)) = grid.world_to_grid(pos) {
+                                (
+                                    grid.get(gx, gy, PheromoneType::Alarm),
+                                    grid.get(gx, gy, PheromoneType::AttackRecruit),
+                                )
+                            } else {
+                                (0.0, 0.0)
+                            }
+                        } else {
+                            (0.0, 0.0)
+                        }
                     } else {
                         (0.0, 0.0)
-                    }
-                } else {
-                    (0.0, 0.0)
-                }
-            } else {
-                (0.0, 0.0)
-            };
+                    };
 
-            let time_in_state = clock.elapsed - ant.state_entered_at;
-            match ant_logic::should_demote_from_defending(
-                true,
-                false, // already filtered by the `else if` — no nearby enemy
-                local_alarm,
-                attack_intensity,
-                0.4,
-                time_in_state,
-            ) {
-                ant_logic::DefendingExit::Stay => {}
-                ant_logic::DefendingExit::Attacking => {
-                    ant.set_state(AntState::Attacking, clock.elapsed);
-                }
-                ant_logic::DefendingExit::Foraging => {
-                    ant.set_state(AntState::Foraging, clock.elapsed);
+                    let time_in_state = clock.elapsed - ant.state_entered_at;
+                    match ant_logic::should_demote_from_defending(
+                        true,
+                        false,
+                        local_alarm,
+                        attack_intensity,
+                        // Effectively-unreachable recruit threshold: combat
+                        // no longer drives the Attacking branch (recruit
+                        // pheromone in foraging.rs still does).
+                        f32::INFINITY,
+                        time_in_state,
+                    ) {
+                        ant_logic::DefendingExit::Stay => {}
+                        ant_logic::DefendingExit::Foraging => {
+                            ant.set_state(AntState::Foraging, clock.elapsed);
+                        }
+                        ant_logic::DefendingExit::Attacking => {
+                            // Unreachable given the infinite threshold above;
+                            // if it ever fires, prefer Foraging over the
+                            // legacy raid branch.
+                            ant.set_state(AntState::Foraging, clock.elapsed);
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-fn combat_resolution(
+/// If an ant was just damaged by an identifiable attacker, commit to fighting
+/// that attacker. Environmental damage (starvation, flood, lawnmower, player)
+/// leaves `last_attacker = None` and is ignored here.
+fn counter_attack_on_damage(
+    mut commands: Commands,
+    clock: Res<SimClock>,
+    mut query: Query<
+        (Entity, &mut Health, &mut Ant, Option<&CombatTarget>),
+        With<ColonyMember>,
+    >,
+    ant_targets: Query<(), (With<Ant>, With<Health>)>,
+    spider_targets: Query<(), With<Spider>>,
+) {
+    if clock.speed == SimSpeed::Paused {
+        return;
+    }
+
+    for (entity, mut health, mut ant, current_target) in &mut query {
+        let Some(attacker) = health.last_attacker else {
+            continue;
+        };
+
+        // Consume the latch so we don't re-trigger every frame.
+        health.last_attacker = None;
+
+        if current_target.is_some() {
+            // Already committed elsewhere — don't retarget.
+            continue;
+        }
+
+        let kind = if ant_targets.get(attacker).is_ok() {
+            TargetKind::Ant
+        } else if spider_targets.get(attacker).is_ok() {
+            TargetKind::Spider
+        } else {
+            // Attacker was despawned in the same frame, or not a valid
+            // targetable kind. Skip.
+            continue;
+        };
+
+        commands.entity(entity).insert(CombatTarget { entity: attacker, kind });
+        ant.set_state(AntState::Fighting, clock.elapsed);
+    }
+}
+
+/// Steer Fighting ants toward their committed target every frame. Overrides
+/// whatever forager/returner steering produced earlier this tick.
+fn fighting_steering(
+    clock: Res<SimClock>,
+    target_positions: Query<&Transform, Without<Ant>>,
+    ant_target_positions: Query<&Transform, With<Ant>>,
+    mut query: Query<(&Transform, &CombatTarget, &mut Movement, &mut TrailSense), With<Ant>>,
+) {
+    if clock.speed == SimSpeed::Paused {
+        return;
+    }
+
+    for (ant_tf, target, mut movement, mut sense) in &mut query {
+        // Target is either an Ant or Spider. We need a Transform for either.
+        let target_tf = match target.kind {
+            TargetKind::Ant => ant_target_positions.get(target.entity).ok(),
+            TargetKind::Spider => target_positions.get(target.entity).ok(),
+        };
+        let Some(tt) = target_tf else {
+            continue; // fighting_apply_damage will handle cleanup this tick
+        };
+        let to_target = tt.translation.truncate() - ant_tf.translation.truncate();
+        let dist = to_target.length();
+
+        // Once within combat range, plant and fight — zero velocity while
+        // keeping the facing direction pointed at the target so sprite/overlay
+        // hints still read correctly. Outside of range, chase the target.
+        if dist < COMBAT_RANGE {
+            movement.direction = Vec2::ZERO;
+        } else {
+            let dir = to_target.normalize_or_zero();
+            if dir.length_squared() > 0.0 {
+                movement.direction = dir;
+            }
+        }
+        *sense = TrailSense::FollowingAlarm;
+        let _ = clock; // silence unused if we later skip on pause
+    }
+}
+
+/// Apply damage from Fighting ants to their committed target when in range,
+/// and drop the commitment when the target is gone or dead.
+fn fighting_apply_damage(
     mut commands: Commands,
     clock: Res<SimClock>,
     time: Res<Time>,
-    mut query: Query<(Entity, &Transform, &ColonyMember, &Ant, &mut Health, &Sprite), Without<HitFlash>>,
+    mut ant_healths: Query<(Entity, &Transform, &mut Health), With<Ant>>,
+    mut spider_healths: Query<(Entity, &Transform, &mut Spider)>,
+    attackers: Query<
+        (Entity, &Transform, &CombatTarget, &Sprite, Has<HitFlash>),
+        With<Ant>,
+    >,
+    mut ants_to_reset: Query<&mut Ant>,
 ) {
     if clock.speed == SimSpeed::Paused {
         return;
@@ -233,33 +403,89 @@ fn combat_resolution(
     let dt = time.delta_secs() * clock.speed.multiplier();
     let mut rng = rand::thread_rng();
 
-    let combatants: Vec<(Vec2, u32)> = query
-        .iter()
-        .filter(|(_, _, _, ant, _, _)| ant.state == AntState::Defending || ant.state == AntState::Fighting)
-        .map(|(_, t, c, _, _, _)| (t.translation.truncate(), c.colony_id))
-        .collect();
+    // First pass: figure out who is in range of their target and how much
+    // damage to deal. We collect to a local Vec so we can then mutate the
+    // target's Health/Spider safely (attacker and target queries disjoint by
+    // entity, but borrow-checker-wise easier this way).
+    struct PendingHit {
+        attacker: Entity,
+        target: Entity,
+        kind: TargetKind,
+        damage: f32,
+        flash_color: Color,
+    }
 
-    for (entity, transform, colony, ant, mut health, sprite) in &mut query {
-        if ant.state != AntState::Defending && ant.state != AntState::Fighting {
+    let mut drops: Vec<Entity> = Vec::new();
+    let mut hits: Vec<PendingHit> = Vec::new();
+
+    for (attacker_entity, att_tf, target, sprite, has_flash) in &attackers {
+        let att_pos = att_tf.translation.truncate();
+
+        let target_alive_and_pos = match target.kind {
+            TargetKind::Ant => ant_healths
+                .get(target.entity)
+                .ok()
+                .map(|(_, t, h)| (t.translation.truncate(), h.current > 0.0)),
+            TargetKind::Spider => spider_healths
+                .get(target.entity)
+                .ok()
+                .map(|(_, t, s)| (t.translation.truncate(), s.hp > 0.0)),
+        };
+
+        let Some((target_pos, alive)) = target_alive_and_pos else {
+            drops.push(attacker_entity);
+            continue;
+        };
+        if ant_logic::should_drop_target(alive) {
+            drops.push(attacker_entity);
             continue;
         }
 
-        let pos = transform.translation.truncate();
-        let nearby_enemies = combatants
-            .iter()
-            .filter(|(p, cid)| *cid != colony.colony_id && p.distance(pos) < COMBAT_RANGE * 2.0)
-            .count();
+        // Skip damage/flash refresh while the flash is still decaying — that
+        // keeps the old DPS cadence (~1 hit per 0.15 s) while still letting
+        // drop-detection run every frame.
+        if has_flash {
+            continue;
+        }
 
-        if nearby_enemies > 0 {
+        if att_pos.distance(target_pos) < COMBAT_RANGE {
             let base_dps = 3.0 + rng.gen_range(-0.5..0.5);
-            let damage = base_dps * nearby_enemies as f32 * dt;
-            health.apply_damage(damage, DamageSource::EnemyAnt);
-
-            // Apply hit flash effect.
-            commands.entity(entity).insert(HitFlash {
-                timer: 0.15,
-                original_color: sprite.color,
+            let damage = base_dps * dt;
+            hits.push(PendingHit {
+                attacker: attacker_entity,
+                target: target.entity,
+                kind: target.kind,
+                damage,
+                flash_color: sprite.color,
             });
+        }
+    }
+
+    // Apply damage.
+    for hit in hits {
+        match hit.kind {
+            TargetKind::Ant => {
+                if let Ok((_, _, mut health)) = ant_healths.get_mut(hit.target) {
+                    health.apply_damage_from(hit.damage, DamageSource::EnemyAnt, hit.attacker);
+                }
+            }
+            TargetKind::Spider => {
+                if let Ok((_, _, mut spider)) = spider_healths.get_mut(hit.target) {
+                    spider.hp -= hit.damage;
+                }
+            }
+        }
+        commands.entity(hit.attacker).insert(HitFlash {
+            timer: 0.15,
+            original_color: hit.flash_color,
+        });
+    }
+
+    // Drop stale targets and return to Foraging.
+    for e in drops {
+        commands.entity(e).remove::<CombatTarget>();
+        if let Ok(mut ant) = ants_to_reset.get_mut(e) {
+            ant.set_state(AntState::Foraging, clock.elapsed);
         }
     }
 }
@@ -292,6 +518,7 @@ fn alarm_pheromone_deposit(
 fn alarm_response_steering(
     clock: Res<SimClock>,
     grids: Option<Res<ColonyPheromones>>,
+    aggression: Res<crate::resources::colony::AggressionSettings>,
     mut query: Query<
         (&Transform, &ColonyMember, &mut Movement, &mut Ant, &mut TrailSense),
         (Without<PlayerControlled>, Without<CarriedItem>),
@@ -312,12 +539,20 @@ fn alarm_response_steering(
             continue;
         };
 
+        // Player colony (0) listens to the UI slider; other colonies keep the
+        // static default so AI-driven colonies stay balanced.
+        let promote_threshold = if colony.colony_id == 0 {
+            aggression.alarm_threshold
+        } else {
+            ant_logic::ALARM_PROMOTE_THRESHOLD
+        };
+
         let pos = transform.translation.truncate();
         let fwd = movement.direction;
 
         if let Some((gx, gy)) = grid.world_to_grid(pos) {
             let local_alarm = grid.get(gx, gy, PheromoneType::Alarm);
-            if local_alarm >= ant_logic::ALARM_PROMOTE_THRESHOLD {
+            if local_alarm >= promote_threshold {
                 let alarm_grad = grid.sense_gradient(gx, gy, PheromoneType::Alarm, fwd, ALARM_SENSE_RADIUS);
                 let time_in_state = clock.elapsed - ant.state_entered_at;
                 if ant_logic::should_promote_to_defending(
@@ -325,6 +560,7 @@ fn alarm_response_steering(
                     local_alarm,
                     alarm_grad.length_squared(),
                     time_in_state,
+                    promote_threshold,
                 ) {
                     ant.set_state(AntState::Defending, clock.elapsed);
                     *sense = TrailSense::FollowingAlarm;
@@ -683,4 +919,258 @@ fn lerp_color(a: Color, b: Color, t: f32) -> Color {
         a.blue + (b.blue - a.blue) * t,
         a.alpha + (b.alpha - a.alpha) * t,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::components::ant::{Caste, Health};
+    use crate::resources::colony::AggressionSettings;
+    use crate::resources::simulation::{SimClock, SimSpeed};
+
+    /// Build a minimal Bevy App with just the systems needed to exercise
+    /// combat target selection, steering, and damage application. No
+    /// rendering, no pheromones, no spiders spawned — callers spawn the
+    /// entities they want.
+    fn make_app() -> App {
+        let mut app = App::new();
+        // No MinimalPlugins — we don't want TimePlugin resetting Time every
+        // frame. We manage Time manually in `tick()`.
+        app.init_resource::<Time>();
+        app.insert_resource(SimClock { tick: 0, elapsed: 0.0, speed: SimSpeed::Normal });
+        app.insert_resource(RedColonyStrategy::default());
+        app.insert_resource(AggressionSettings::default());
+        app.add_systems(
+            Update,
+            (
+                counter_attack_on_damage,
+                combat_target_selection,
+                fighting_steering,
+                fighting_apply_damage,
+                hit_flash_decay,
+            )
+                .chain(),
+        );
+        app
+    }
+
+    fn spawn_test_ant(
+        app: &mut App,
+        colony_id: u32,
+        pos: Vec2,
+        hp: f32,
+    ) -> Entity {
+        // Shared dummy map so combat_target_selection's map filter allows
+        // both spawn_test_ant entities to see each other. Stored as a
+        // resource so multiple spawns reuse the same id.
+        let map_entity = if let Some(m) = app.world().get_resource::<TestMap>() {
+            m.0
+        } else {
+            let e = app.world_mut().spawn_empty().id();
+            app.world_mut().insert_resource(TestMap(e));
+            e
+        };
+        app.world_mut()
+            .spawn((
+                Ant {
+                    caste: Caste::Worker,
+                    state: AntState::Foraging,
+                    age: 0.0,
+                    hunger: 0.0,
+                    state_entered_at: 0.0,
+                },
+                Movement { speed: 20.0, direction: Vec2::X },
+                Health { current: hp, max: hp, last_damage_source: None, last_attacker: None },
+                ColonyMember { colony_id },
+                MapId(map_entity),
+                Transform::from_xyz(pos.x, pos.y, 0.0),
+                Sprite::default(),
+                TrailSense::default(),
+            ))
+            .id()
+    }
+
+    #[derive(Resource)]
+    struct TestMap(Entity);
+
+    fn tick(app: &mut App, dt_secs: f32) {
+        {
+            let mut clock = app.world_mut().resource_mut::<SimClock>();
+            clock.tick += 1;
+            clock.elapsed += dt_secs;
+        }
+        {
+            // MinimalPlugins advances Time using real wall-clock deltas,
+            // which are unreliable in tests. Stamp a known delta so
+            // fighting_apply_damage deals predictable DPS per tick.
+            let mut time = app.world_mut().resource_mut::<Time>();
+            time.advance_by(std::time::Duration::from_secs_f32(dt_secs));
+        }
+        app.update();
+    }
+
+    #[test]
+    fn sim_plugin_combat_commits_target_until_dead() {
+        let mut app = make_app();
+
+        // Two opposing ants just inside engage range.
+        let attacker = spawn_test_ant(&mut app, 0, Vec2::ZERO, 10.0);
+        let victim = spawn_test_ant(&mut app, 1, Vec2::new(COMBAT_RANGE - 1.0, 0.0), 10.0);
+
+        // First frame: combat_target_selection should latch both ants onto
+        // each other and flip them to Fighting.
+        tick(&mut app, 0.016);
+
+        let attacker_target = app
+            .world()
+            .entity(attacker)
+            .get::<CombatTarget>()
+            .copied()
+            .expect("attacker should have a CombatTarget after one frame");
+        assert_eq!(attacker_target.entity, victim);
+        assert_eq!(
+            app.world().entity(attacker).get::<Ant>().unwrap().state,
+            AntState::Fighting
+        );
+
+        // Run enough ticks to kill the victim at ~3 DPS on 10 HP.
+        for _ in 0..500 {
+            let victim_hp = app.world().entity(victim).get::<Health>().unwrap().current;
+            if victim_hp <= 0.0 {
+                break;
+            }
+            tick(&mut app, 0.05);
+        }
+
+        let victim_hp = app.world().entity(victim).get::<Health>().unwrap().current;
+        assert_eq!(victim_hp, 0.0, "victim should be at zero HP");
+
+        // Attacker kept its target throughout the fight.
+        assert!(
+            app.world().entity(attacker).get::<CombatTarget>().is_some(),
+            "attacker should still hold CombatTarget until should_drop_target fires"
+        );
+    }
+
+    #[test]
+    fn sim_plugin_combat_drops_target_when_target_despawned() {
+        let mut app = make_app();
+        let attacker = spawn_test_ant(&mut app, 0, Vec2::ZERO, 10.0);
+        let victim = spawn_test_ant(&mut app, 1, Vec2::new(COMBAT_RANGE - 1.0, 0.0), 10.0);
+
+        // Frame 1: latch.
+        tick(&mut app, 0.016);
+        assert!(app.world().entity(attacker).get::<CombatTarget>().is_some());
+
+        // Simulate death: despawn the victim directly.
+        app.world_mut().entity_mut(victim).despawn();
+
+        // Frame 2: fighting_apply_damage should see the target is gone and
+        // drop the CombatTarget + return attacker to Foraging.
+        tick(&mut app, 0.016);
+
+        assert!(
+            app.world().entity(attacker).get::<CombatTarget>().is_none(),
+            "CombatTarget should be removed once target despawns"
+        );
+        assert_eq!(
+            app.world().entity(attacker).get::<Ant>().unwrap().state,
+            AntState::Foraging,
+            "attacker should return to Foraging after dropping target"
+        );
+    }
+
+    #[test]
+    fn sim_plugin_counter_attack_latches_onto_attacker() {
+        let mut app = make_app();
+        // Keep them OUT of engage range so combat_target_selection won't
+        // auto-commit — we want to exercise the counter-attack path only.
+        let victim = spawn_test_ant(&mut app, 0, Vec2::ZERO, 10.0);
+        let attacker = spawn_test_ant(&mut app, 1, Vec2::new(100.0, 0.0), 10.0);
+
+        // Pretend the attacker already hit the victim from range.
+        {
+            let mut victim_mut = app.world_mut().entity_mut(victim);
+            let mut h = victim_mut.get_mut::<Health>().unwrap();
+            h.last_attacker = Some(attacker);
+            h.last_damage_source = Some(DamageSource::EnemyAnt);
+        }
+
+        tick(&mut app, 0.016);
+
+        let target = app.world().entity(victim).get::<CombatTarget>().copied();
+        assert_eq!(
+            target.map(|t| t.entity),
+            Some(attacker),
+            "victim should lock onto its attacker via counter-attack"
+        );
+        assert_eq!(
+            app.world().entity(victim).get::<Ant>().unwrap().state,
+            AntState::Fighting
+        );
+    }
+
+    #[test]
+    fn sim_plugin_fighting_ant_plants_when_target_is_in_range() {
+        let mut app = make_app();
+        let attacker = spawn_test_ant(&mut app, 0, Vec2::ZERO, 10.0);
+        let _victim = spawn_test_ant(&mut app, 1, Vec2::new(COMBAT_RANGE - 2.0, 0.0), 100.0);
+
+        // One tick to latch + steer.
+        tick(&mut app, 0.016);
+
+        let movement = app.world().entity(attacker).get::<Movement>().unwrap();
+        assert_eq!(
+            movement.direction,
+            Vec2::ZERO,
+            "attacker should zero its movement direction when within COMBAT_RANGE"
+        );
+    }
+
+    #[test]
+    fn sim_plugin_fighting_ant_chases_when_target_out_of_range() {
+        let mut app = make_app();
+        let attacker = spawn_test_ant(&mut app, 0, Vec2::ZERO, 10.0);
+        // Place victim within engagement range for initial target selection,
+        // then move them just past COMBAT_RANGE so the steer-toward path runs.
+        let victim = spawn_test_ant(&mut app, 1, Vec2::new(COMBAT_RANGE - 1.0, 0.0), 100.0);
+
+        tick(&mut app, 0.016);
+        assert!(app.world().entity(attacker).get::<CombatTarget>().is_some());
+
+        // Slide the victim further away to force chase.
+        {
+            let mut victim_mut = app.world_mut().entity_mut(victim);
+            let mut t = victim_mut.get_mut::<Transform>().unwrap();
+            t.translation.x = COMBAT_RANGE + 5.0;
+        }
+        tick(&mut app, 0.016);
+
+        let movement = app.world().entity(attacker).get::<Movement>().unwrap();
+        assert!(
+            movement.direction.x > 0.9,
+            "attacker should steer toward the target when out of range, got {:?}",
+            movement.direction
+        );
+    }
+
+    #[test]
+    fn sim_plugin_starvation_damage_does_not_trigger_counter_attack() {
+        let mut app = make_app();
+        let ant = spawn_test_ant(&mut app, 0, Vec2::ZERO, 10.0);
+
+        // Apply environmental damage — no attacker entity.
+        {
+            let mut ant_mut = app.world_mut().entity_mut(ant);
+            let mut h = ant_mut.get_mut::<Health>().unwrap();
+            h.apply_damage(3.0, DamageSource::Starvation);
+        }
+
+        tick(&mut app, 0.016);
+
+        assert!(
+            app.world().entity(ant).get::<CombatTarget>().is_none(),
+            "Starvation must not produce a CombatTarget"
+        );
+    }
 }

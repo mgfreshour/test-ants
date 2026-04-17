@@ -194,6 +194,29 @@ pub struct Health {
     pub current: f32,
     pub max: f32,
     pub last_damage_source: Option<DamageSource>,
+    /// Entity that last dealt damage to this one, when identifiable (enemy ant
+    /// or spider). Environmental/player damage leaves this `None` so the
+    /// counter-attack system ignores it.
+    pub last_attacker: Option<Entity>,
+}
+
+/// Kind of entity an ant is committed to fighting. Separate from `AntState`
+/// so visuals/UI can keep using `AntState::Fighting` while targeting logic
+/// lives in `CombatTarget`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetKind {
+    Ant,
+    Spider,
+}
+
+/// Committed combat target. Presence of this component means the ant is
+/// engaged and must pursue the target until it dies (target entity despawned
+/// or query miss). Owners should also set `AntState::Fighting` to keep the
+/// rest of the codebase consistent.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct CombatTarget {
+    pub entity: Entity,
+    pub kind: TargetKind,
 }
 
 #[derive(Component)]
@@ -324,12 +347,21 @@ impl Health {
         self.last_damage_source = Some(source);
     }
 
+    /// Record damage along with the attacker entity so the counter-attack
+    /// system can lock on. Use this for ant-vs-ant and spider-vs-ant hits
+    /// where the attacker is identifiable; environmental sources should keep
+    /// using `apply_damage` so `last_attacker` stays `None`.
+    pub fn apply_damage_from(&mut self, amount: f32, source: DamageSource, attacker: Entity) {
+        self.apply_damage(amount, source);
+        self.last_attacker = Some(attacker);
+    }
+
     pub fn worker() -> Self {
-        Self { current: 10.0, max: 10.0, last_damage_source: None }
+        Self { current: 10.0, max: 10.0, last_damage_source: None, last_attacker: None }
     }
 
     pub fn soldier() -> Self {
-        Self { current: 25.0, max: 25.0, last_damage_source: None }
+        Self { current: 25.0, max: 25.0, last_damage_source: None, last_attacker: None }
     }
 }
 

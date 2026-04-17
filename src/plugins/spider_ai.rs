@@ -288,7 +288,7 @@ fn spider_chase(
 fn spider_attack(
     clock: Res<SimClock>,
     time: Res<Time>,
-    mut spider_query: Query<(&Transform, &mut Spider)>,
+    mut spider_query: Query<(Entity, &Transform, &mut Spider)>,
     mut ant_query: Query<(Entity, &Transform, &mut Health), With<Ant>>,
 ) {
     if clock.speed == SimSpeed::Paused {
@@ -297,7 +297,7 @@ fn spider_attack(
 
     let dt = time.delta_secs() * clock.speed.multiplier();
 
-    for (spider_tf, mut spider) in &mut spider_query {
+    for (spider_entity, spider_tf, mut spider) in &mut spider_query {
         spider.attack_cooldown = (spider.attack_cooldown - dt).max(0.0);
         if spider.attack_cooldown > 0.0 {
             continue;
@@ -314,7 +314,7 @@ fn spider_attack(
         for (entity, ant_tf, mut health) in &mut ant_query {
             let dist = spider_pos.distance(ant_tf.translation.truncate());
             if dist < SPIDER_ATTACK_RANGE {
-                health.apply_damage(SPIDER_ATTACK_DAMAGE, DamageSource::Spider);
+                health.apply_damage_from(SPIDER_ATTACK_DAMAGE, DamageSource::Spider, spider_entity);
                 spider.attack_cooldown = SPIDER_ATTACK_COOLDOWN;
                 hit = true;
 
