@@ -6,6 +6,8 @@ use crate::resources::active_map::MapRegistry;
 use crate::resources::pheromone::ColonyPheromones;
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 use crate::components::pheromone::PheromoneType;
+use crate::resources::surface_grid::SurfaceGrid;
+use crate::sim_core::wall_avoidance;
 
 const ANTI_BACKTRACK_WEIGHT: f32 = 0.35;
 const FORWARD_WEIGHT: f32 = 0.6;
@@ -21,6 +23,7 @@ pub fn ant_return_steering(
     config: Res<SimConfig>,
     grids: Option<Res<ColonyPheromones>>,
     registry: Res<MapRegistry>,
+    surface_grid: Res<SurfaceGrid>,
     portal_query: Query<&MapPortal>,
     mut query: Query<(&Transform, &mut Movement, &Ant, &ColonyMember, &crate::components::map::MapId, &PositionHistory, &mut TrailSense, &mut SteeringTarget, &mut SteeringWeights), (With<CarriedItem>, Without<PlayerControlled>)>,
 ) {
@@ -102,8 +105,14 @@ pub fn ant_return_steering(
 
         let momentum = history.anti_backtrack(pos) * ANTI_BACKTRACK_WEIGHT;
 
+        let wall_force = wall_avoidance::compute_wall_avoidance(
+            pos, fwd, &surface_grid,
+            wall_avoidance::WHISKER_LENGTH, wall_avoidance::WHISKER_SPREAD,
+        );
+
         let noise_scale = if on_trail { 0.3 } else { 1.0 };
-        let mut target_dir = (fwd * FORWARD_WEIGHT + perturbed_fwd * noise_scale + bias + momentum)
+        let mut target_dir = (fwd * FORWARD_WEIGHT + perturbed_fwd * noise_scale + bias + momentum
+            + wall_force * wall_avoidance::WALL_AVOID_WEIGHT)
             .normalize_or_zero();
         if target_dir == Vec2::ZERO {
             target_dir = perturbed_fwd;

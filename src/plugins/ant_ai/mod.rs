@@ -5,6 +5,7 @@ use crate::components::terrain::FoodSource;
 use crate::resources::active_map::MapRegistry;
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
 use crate::resources::spatial_grid::SpatialGrid;
+use crate::resources::surface_grid::SurfaceGrid;
 
 pub mod defending;
 pub mod foraging;
@@ -52,6 +53,7 @@ impl Plugin for AntAiPlugin {
                         ant_movement,
                         record_position_history,
                         ant_boundary_bounce,
+                        ant_wall_collision,
                         ant_pheromone_deposit,
                         update_ant_visuals,
                         spawn_state_labels,
@@ -341,6 +343,63 @@ fn ant_boundary_bounce(
         transform.translation.x = next_pos.x;
         transform.translation.y = next_pos.y;
         movement.direction = next_dir;
+    }
+}
+
+fn ant_wall_collision(
+    clock: Res<SimClock>,
+    registry: Res<MapRegistry>,
+    surface_grid: Res<SurfaceGrid>,
+    mut query: Query<(&mut Transform, &mut Movement, &MapId), With<Ant>>,
+) {
+    if clock.speed == SimSpeed::Paused {
+        return;
+    }
+
+    for (mut transform, mut movement, map_id) in &mut query {
+        if map_id.0 != registry.surface {
+            continue;
+        }
+        let pos = transform.translation.truncate();
+        if !surface_grid.is_blocked_world(pos) {
+            continue;
+        }
+        // Push ant to the nearest open cell center
+        if let Some((gx, gy)) = surface_grid.world_to_grid(pos) {
+            let dirs: [(i32, i32); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
+            let mut best: Option<Vec2> = None;
+            let mut best_dist = f32::MAX;
+            for (dx, dy) in dirs {
+                let nx = gx as i32 + dx;
+                let ny = gy as i32 + dy;
+                if nx >= 0 && ny >= 0 {
+                    let (ux, uy) = (nx as usize, ny as usize);
+                    if !surface_grid.is_blocked(ux, uy) {
+                        let center = Vec2::new(
+                            (ux as f32 + 0.5) * surface_grid.cell_size,
+                            (uy as f32 + 0.5) * surface_grid.cell_size,
+                        );
+                        let d = pos.distance_squared(center);
+                        if d < best_dist {
+                            best_dist = d;
+                            best = Some(center);
+                        }
+                    }
+                }
+            }
+            if let Some(safe_pos) = best {
+                transform.translation.x = safe_pos.x;
+                transform.translation.y = safe_pos.y;
+                // Reverse direction component pointing into the wall
+                let wall_normal = (safe_pos - pos).normalize_or_zero();
+                if wall_normal != Vec2::ZERO {
+                    let dot = movement.direction.dot(wall_normal);
+                    if dot < 0.0 {
+                        movement.direction = (movement.direction - wall_normal * dot * 2.0).normalize_or_zero();
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -8,7 +8,9 @@ use crate::resources::nest::NestGrid;
 use crate::resources::nest_pheromone::NestPheromoneGrid;
 use crate::resources::pheromone::ColonyPheromones;
 use crate::resources::simulation::{SimClock, SimSpeed};
+use crate::resources::surface_grid::SurfaceGrid;
 use crate::components::pheromone::PheromoneType;
+use crate::sim_core::wall_avoidance;
 
 const FORWARD_WEIGHT: f32 = 0.6;
 const PHERO_SENSE_RADIUS: i32 = 4;
@@ -21,6 +23,7 @@ const ATTACK_ENEMY_DETECT_RANGE: f32 = 80.0;
 pub fn ant_follow_recruit_steering(
     clock: Res<SimClock>,
     registry: Res<MapRegistry>,
+    surface_grid: Res<SurfaceGrid>,
     grids: Option<Res<ColonyPheromones>>,
     mut query: Query<(&Transform, &mut Movement, &mut Ant, &ColonyMember, &MapId, &mut TrailSense, &mut SteeringTarget, &mut SteeringWeights), Without<PlayerControlled>>,
 ) {
@@ -58,9 +61,14 @@ pub fn ant_follow_recruit_steering(
                                 rng.gen_range(-0.1..0.1),
                                 rng.gen_range(-0.1..0.1),
                             );
+                            let wall_force = wall_avoidance::compute_wall_avoidance(
+                                pos, fwd, &surface_grid,
+                                wall_avoidance::WHISKER_LENGTH, wall_avoidance::WHISKER_SPREAD,
+                            );
                             let new_dir = (grad.normalize() * RECRUIT_GRADIENT_WEIGHT
                                 + fwd * 0.3
-                                + jitter)
+                                + jitter
+                                + wall_force * wall_avoidance::WALL_AVOID_WEIGHT)
                                 .normalize_or_zero();
                             if new_dir != Vec2::ZERO {
                                 *steering_target = SteeringTarget::Direction { target: new_dir };
@@ -90,6 +98,7 @@ pub fn ant_follow_recruit_steering(
 pub fn ant_attack_recruit_steering(
     clock: Res<SimClock>,
     registry: Res<MapRegistry>,
+    surface_grid: Res<SurfaceGrid>,
     grids: Option<Res<ColonyPheromones>>,
     mut query: Query<(&Transform, &mut Movement, &mut Ant, &ColonyMember, &MapId, &mut TrailSense, &mut SteeringTarget, &mut SteeringWeights), Without<PlayerControlled>>,
     enemy_query: Query<(&Transform, &ColonyMember), With<Ant>>,
@@ -162,9 +171,14 @@ pub fn ant_attack_recruit_steering(
                                 rng.gen_range(-0.1..0.1),
                                 rng.gen_range(-0.1..0.1),
                             );
+                            let wall_force = wall_avoidance::compute_wall_avoidance(
+                                pos, fwd, &surface_grid,
+                                wall_avoidance::WHISKER_LENGTH, wall_avoidance::WHISKER_SPREAD,
+                            );
                             let new_dir = (grad.normalize() * RECRUIT_GRADIENT_WEIGHT
                                 + fwd * 0.3
-                                + jitter)
+                                + jitter
+                                + wall_force * wall_avoidance::WALL_AVOID_WEIGHT)
                                 .normalize_or_zero();
                             if new_dir != Vec2::ZERO {
                                 *steering_target = SteeringTarget::Direction { target: new_dir };

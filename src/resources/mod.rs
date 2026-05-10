@@ -6,3 +6,4 @@ pub mod nest_pheromone;
 pub mod pheromone;
 pub mod simulation;
 pub mod spatial_grid;
+pub mod surface_grid;

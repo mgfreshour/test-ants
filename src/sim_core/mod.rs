@@ -14,6 +14,7 @@ pub mod nest_transitions;
 pub mod regressions;
 pub mod rng;
 pub mod steering;
+pub mod wall_avoidance;
 #[cfg(test)]
 pub mod test_fixtures;
 

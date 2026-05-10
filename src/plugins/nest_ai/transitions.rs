@@ -309,7 +309,7 @@ pub(super) fn nest_to_surface_transition(
                     continue;
                 };
 
-                ant.state = AntState::Foraging;
+                ant.set_state(AntState::Foraging, clock.elapsed);
                 transform.translation.x = surface_pos.x + rng.gen_range(-15.0..15.0);
                 transform.translation.y = surface_pos.y + rng.gen_range(-15.0..15.0);
                 // Visibility will be corrected by sync_map_visibility.

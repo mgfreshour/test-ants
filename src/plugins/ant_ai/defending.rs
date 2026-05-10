@@ -4,6 +4,8 @@ use crate::components::ant::{Ant, AntJob, AntState, ColonyMember, Movement, Play
 use crate::components::map::MapPortal;
 use crate::resources::active_map::MapRegistry;
 use crate::resources::simulation::{SimClock, SimConfig, SimSpeed};
+use crate::resources::surface_grid::SurfaceGrid;
+use crate::sim_core::wall_avoidance;
 
 const PATROL_RADIUS: f32 = 120.0;
 const FORWARD_WEIGHT: f32 = 0.5;
@@ -15,6 +17,7 @@ pub fn ant_defender_patrol(
     clock: Res<SimClock>,
     config: Res<SimConfig>,
     registry: Res<MapRegistry>,
+    surface_grid: Res<SurfaceGrid>,
     portal_query: Query<&MapPortal>,
     mut query: Query<
         (&Transform, &mut Movement, &Ant, &AntJob, &ColonyMember, &mut TrailSense, &mut SteeringTarget, &mut SteeringWeights),
@@ -71,7 +74,13 @@ pub fn ant_defender_patrol(
         let new_angle = current_angle + angle_offset;
         let perturbed = Vec2::new(new_angle.cos(), new_angle.sin());
 
-        let target_dir = (fwd * FORWARD_WEIGHT + perturbed * 0.5 + return_bias)
+        let wall_force = wall_avoidance::compute_wall_avoidance(
+            pos, fwd, &surface_grid,
+            wall_avoidance::WHISKER_LENGTH, wall_avoidance::WHISKER_SPREAD,
+        );
+
+        let target_dir = (fwd * FORWARD_WEIGHT + perturbed * 0.5 + return_bias
+            + wall_force * wall_avoidance::WALL_AVOID_WEIGHT)
             .normalize_or_zero();
 
         *steering_target = SteeringTarget::Direction { target: target_dir };

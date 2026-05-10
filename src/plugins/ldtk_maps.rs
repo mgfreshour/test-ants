@@ -10,12 +10,17 @@ use crate::resources::active_map::MapRegistry;
 use crate::resources::nest::{NestGrid, NEST_CELL_SIZE, NEST_HEIGHT, NEST_WIDTH};
 use crate::resources::nest_pathfinding::NestPathCache;
 use crate::resources::nest_pheromone::NestPheromoneGrid;
+use crate::resources::surface_grid::SurfaceGrid;
 
 pub struct LdtkMapsPlugin;
 
 /// Marker: this nest map's NestGrid has been rebuilt from LDtk IntGrid data.
 #[derive(Component)]
 struct NestLdtkSynced;
+
+/// Resource: surface grid has been built from LDtk IntGrid data.
+#[derive(Resource)]
+struct SurfaceLdtkSynced;
 
 /// Marker: this LDtk entity has been processed into game components.
 #[derive(Component)]
@@ -40,7 +45,8 @@ struct LdtkQueensSpawned;
 
 impl Plugin for LdtkMapsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(LdtkPlugin)
+        app.init_resource::<SurfaceGrid>()
+            .add_plugins(LdtkPlugin)
             .insert_resource(LdtkSettings {
                 level_spawn_behavior: LevelSpawnBehavior::UseZeroTranslation,
                 set_clear_color: SetClearColor::No,
@@ -52,6 +58,7 @@ impl Plugin for LdtkMapsPlugin {
                 Update,
                 (
                     sync_ldtk_nest_tiles,
+                    sync_ldtk_surface_tiles,
                     process_ldtk_entities,
                     wire_ldtk_portals,
                     spawn_queens_from_ldtk,
@@ -167,6 +174,35 @@ fn sync_ldtk_nest_tiles(
         path_cache.invalidate();
         commands.entity(map_entity).insert(NestLdtkSynced);
     }
+}
+
+/// Build a SurfaceGrid from IntGrid tiles belonging to the surface map.
+fn sync_ldtk_surface_tiles(
+    mut commands: Commands,
+    existing: Option<Res<SurfaceLdtkSynced>>,
+    registry: Res<MapRegistry>,
+    config: Res<crate::resources::simulation::SimConfig>,
+    tiles: Query<(&IntGridCell, &GridCoords, &MapId)>,
+    mut surface_grid: ResMut<SurfaceGrid>,
+) {
+    if existing.is_some() {
+        return;
+    }
+
+    let surface_tiles: Vec<(i32, i32, i32)> = tiles
+        .iter()
+        .filter(|(_, _, map_id)| map_id.0 == registry.surface)
+        .map(|(cell, coords, _)| (coords.x, coords.y, cell.value))
+        .collect();
+
+    if surface_tiles.is_empty() {
+        return;
+    }
+
+    let width = (config.world_width / config.tile_size).ceil() as usize;
+    let height = (config.world_height / config.tile_size).ceil() as usize;
+    *surface_grid = SurfaceGrid::from_intgrid(width, height, config.tile_size, &surface_tiles);
+    commands.insert_resource(SurfaceLdtkSynced);
 }
 
 /// Walk ChildOf hierarchy from an entity up 3 levels to find the LdtkWorldBundle's MapId.
