@@ -31,8 +31,10 @@ const NEST_COLS: u32 = 8;
 const NEST_ROWS: u32 = 4;
 
 const NEST_ROW_PLAYER_IDLE: usize = 0;
+#[allow(dead_code)]
 const NEST_ROW_PLAYER_ACTIVE: usize = 1;
 const NEST_ROW_ENEMY_IDLE: usize = 2;
+#[allow(dead_code)]
 const NEST_ROW_ENEMY_ACTIVE: usize = 3;
 
 #[derive(Resource)]
@@ -69,6 +71,7 @@ const ANTLION_COLS: u32 = 8;
 const ANTLION_ROWS: u32 = 4;
 
 const ANTLION_ROW_IDLE: usize = 0;
+#[allow(dead_code)]
 const ANTLION_ROW_ATTACK: usize = 1;
 const ANTLION_ROW_DEATH: usize = 2;
 const ANTLION_ROW_PIT: usize = 3;
@@ -158,7 +161,7 @@ pub struct FoodSpritesheet {
 
 /// Marks a food entity that has been given a sprite variant.
 #[derive(Component)]
-pub struct FoodVariant(pub usize);
+pub struct FoodVariant(#[allow(dead_code)] pub usize);
 
 /// Per-entity animation state.
 #[derive(Component)]

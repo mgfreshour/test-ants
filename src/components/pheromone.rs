@@ -24,6 +24,7 @@ impl PheromoneType {
         }
     }
 
+    #[allow(dead_code)]
     pub fn color(&self) -> Color {
         match self {
             PheromoneType::Home => Color::srgba(0.2, 0.4, 1.0, 0.7),

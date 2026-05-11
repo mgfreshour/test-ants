@@ -562,7 +562,7 @@ fn player_hud_panel(
                         .on_hover_text("Recruit mode — V to toggle");
 
                     // Queen hunger bar
-                    if let Some((queen_hunger, queen_health, _)) = queen_query.iter().find(|(_, _, c)| c.colony_id == 0) {
+                    if let Some((queen_hunger, _queen_health, _)) = queen_query.iter().find(|(_, _, c)| c.colony_id == 0) {
                         ui.separator();
                         let satiation = queen_hunger.satiation.clamp(0.0, 1.0);
                         let hunger_frac = 1.0 - satiation;

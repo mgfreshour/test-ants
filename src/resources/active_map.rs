@@ -39,6 +39,7 @@ pub struct MapRegistry {
 
 impl MapRegistry {
     /// Look up the nest entity for a given colony_id.
+    #[allow(dead_code)]
     pub fn nest_for_colony(&self, colony_id: u32) -> Option<Entity> {
         match colony_id {
             0 => Some(self.player_nest),

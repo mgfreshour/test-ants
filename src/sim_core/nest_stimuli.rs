@@ -26,6 +26,7 @@ pub struct ThresholdSet {
     pub dig: f32,
 }
 
+#[allow(dead_code)]
 impl ThresholdSet {
     /// Get threshold for a given stimulus type.
     pub fn get(&self, stimulus: StimulusType) -> f32 {
@@ -51,7 +52,9 @@ impl ThresholdSet {
     }
 }
 
+#[allow(dead_code)]
 const INERTIA_REDUCTION: f32 = 0.05;
+#[allow(dead_code)]
 const INERTIA_FLOOR: f32 = 0.05;
 
 /// Initialize thresholds based on ant job.
@@ -102,6 +105,7 @@ pub fn larva_stimulus_strength(distance_cells: f32, brood_pheromone: f32) -> f32
 
 /// Stimulus strength for a hungry queen (legacy — uses direct hunger query).
 /// Retained for test baseline comparisons.
+#[allow(dead_code)]
 pub fn queen_stimulus_strength(queen_hunger: f32, queen_signal: f32) -> f32 {
     // queen_hunger: 0 = fully fed, 1 = starving
     let urgency = 0.3 + queen_hunger * 0.7;

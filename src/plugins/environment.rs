@@ -77,6 +77,7 @@ pub struct ActiveMower {
     /// Direction sign: 1.0 (left→right) or -1.0 (right→left).
     pub direction: f32,
     /// Damage radius.
+    #[allow(dead_code)]
     pub radius: f32,
     /// Hazard id for the moving zone (so visuals track it).
     pub hazard_id: u64,

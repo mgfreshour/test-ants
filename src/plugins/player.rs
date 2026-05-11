@@ -108,6 +108,7 @@ impl RecruitMode {
         }
     }
 
+    #[allow(dead_code)]
     pub fn label(self) -> &'static str {
         match self {
             RecruitMode::Follow => "Follow",
@@ -274,7 +275,7 @@ fn player_portal_transition(
         return;
     }
 
-    let Ok((player_entity, mut player_tf, mut player_map, mut player_vis, colony)) =
+    let Ok((player_entity, mut player_tf, mut player_map, mut player_vis, _colony)) =
         player_query.single_mut()
     else {
         return;

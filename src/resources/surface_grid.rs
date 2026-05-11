@@ -59,6 +59,7 @@ impl SurfaceGrid {
         }
     }
 
+    #[allow(dead_code)]
     pub fn from_intgrid(width: usize, height: usize, cell_size: f32, tiles: &[(i32, i32, i32)]) -> Self {
         let mut grid = Self::new(width, height, cell_size);
         for &(x, y, value) in tiles {
@@ -72,6 +73,7 @@ impl SurfaceGrid {
     }
 }
 
+#[allow(dead_code)]
 fn intgrid_to_surface_cell(value: i32) -> SurfaceCell {
     match value {
         1..=7 => SurfaceCell::Open,

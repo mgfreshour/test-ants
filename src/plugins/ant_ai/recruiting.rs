@@ -33,7 +33,7 @@ pub fn ant_follow_recruit_steering(
 
     let mut rng = rand::thread_rng();
 
-    for (transform, mut movement, mut ant, colony, map_id, mut sense, mut steering_target, mut steering_weights) in &mut query {
+    for (transform, movement, mut ant, colony, map_id, mut sense, mut steering_target, mut steering_weights) in &mut query {
         if ant.state != AntState::Following {
             continue;
         }
@@ -109,7 +109,7 @@ pub fn ant_attack_recruit_steering(
 
     let mut rng = rand::thread_rng();
 
-    for (transform, mut movement, mut ant, colony, map_id, mut sense, mut steering_target, mut steering_weights) in &mut query {
+    for (transform, movement, mut ant, colony, map_id, mut sense, mut steering_target, mut steering_weights) in &mut query {
         if ant.state != AntState::Attacking {
             continue;
         }

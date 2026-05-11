@@ -8,9 +8,12 @@ use crate::sim_core::ant_logic;
 use super::ColonyFood;
 
 const HUNGER_RATE: f32 = 0.004;
+#[allow(dead_code)]
 const HUNGER_SLOW_THRESHOLD: f32 = 0.8;
+#[allow(dead_code)]
 const HUNGER_SLOW_FACTOR: f32 = 0.7;
 const STARVATION_DPS: f32 = 0.5;
+#[allow(dead_code)]
 const DEPOSIT_HUNGER_RELIEF: f32 = 0.3;
 const NEST_FEED_RANGE: f32 = 60.0;
 const NEST_FEED_THRESHOLD: f32 = 0.4;

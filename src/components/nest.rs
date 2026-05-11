@@ -94,6 +94,7 @@ impl CellType {
 }
 
 #[derive(Component)]
+#[allow(dead_code)]
 pub struct NestTile {
     pub grid_x: usize,
     pub grid_y: usize,
@@ -198,6 +199,7 @@ impl Brood {
 
 #[derive(Component)]
 pub struct FoodEntity {
+    #[allow(dead_code)]
     pub amount: f32,
 }
 
@@ -233,6 +235,7 @@ impl NestPath {
         self.current_index >= self.waypoints.len()
     }
 
+    #[allow(dead_code)]
     pub fn destination(&self) -> Option<GridPos> {
         self.waypoints.last().copied()
     }
@@ -285,6 +288,7 @@ pub enum AttendStep {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum DigStep {
     GoToFace,
     Excavate,

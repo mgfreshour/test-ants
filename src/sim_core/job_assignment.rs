@@ -27,6 +27,7 @@ pub struct JobCounts {
     pub unassigned: usize,
 }
 
+#[allow(dead_code)]
 impl JobCounts {
     pub fn total(&self) -> usize {
         self.forager + self.nurse + self.digger + self.defender + self.unassigned
@@ -274,7 +275,7 @@ mod tests {
 
     #[test]
     fn young_ant_reassigns_away_from_forager() {
-        let input = JobAssignmentInput {
+        let _input = JobAssignmentInput {
             total_ants: 100,
             target_ratios: JobRatios {
                 forage: 0.5,
@@ -290,32 +291,23 @@ mod tests {
                 unassigned: 0,
             },
         };
-        // Young ant as forager with forager deficit
-        // Forager: 50% current, 50% target, outside 5% band (45-55%? no, exactly at 50%)
-        // Let me recalc: band is [50 - 5, 50 + 5] = [45, 55], so 50% IS in band
-        // So no reassignment happens. Let me modify the test to actually trigger reassignment.
 
-        let input = JobAssignmentInput {
+        let _input = JobAssignmentInput {
             total_ants: 100,
             target_ratios: JobRatios {
-                forage: 0.7,    // Increased forager target
+                forage: 0.7,
                 nurse: 0.2,
                 dig: 0.05,
                 defend: 0.05,
             },
             current_assignments: JobCounts {
-                forager: 50,    // Currently only 50%, target is 70%
+                forager: 50,
                 nurse: 35,
                 digger: 10,
                 defender: 5,
                 unassigned: 0,
             },
         };
-        // Young ant (high nurse affinity) as forager when forager is at 50% < 70% target
-        // Forager has deficit (70 - 50 = 20%). Nurse has no deficit (35 vs 20 target).
-        // But young ant has high nurse affinity. However, nurse has NO deficit, so score is baseline.
-        // Forager score = young_forager_affinity * 0.20. Nurse score = young_nurse_affinity * 0.0.
-        // Actually forager ALSO has no deficit. Let me recalc input target ratios must sum to ~1.0.
 
         let input = JobAssignmentInput {
             total_ants: 100,

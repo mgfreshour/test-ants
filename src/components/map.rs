@@ -7,6 +7,7 @@ pub struct MapId(pub Entity);
 
 /// Describes the kind of map a map entity represents.
 #[derive(Component, Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[allow(dead_code)]
 pub enum MapKind {
     Surface,
     Nest { colony_id: u32 },
@@ -39,6 +40,7 @@ pub struct MapPortal {
     /// Colony restriction. `None` = open to all.
     pub colony_id: Option<u32>,
     /// The portal entity on the other side of this connection.
+    #[allow(dead_code)]
     pub pair: Entity,
 }
 

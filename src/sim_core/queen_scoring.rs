@@ -16,6 +16,7 @@ pub struct QueenScoringInput {
     /// Number of living brood (eggs + larvae + pupae).
     pub brood_count: u32,
     /// Total food stored in the colony.
+    #[allow(dead_code)]
     pub colony_food_stored: f32,
     /// Whether a queen chamber exists in the nest grid.
     pub has_queen_chamber: bool,
@@ -113,6 +114,7 @@ pub fn queen_hunger_signal(hunger_frac: f32, max_strength: f32) -> f32 {
 
 impl QueenScoringInput {
     /// Fully-fed, healthy queen with a queen chamber and no brood.
+    #[allow(dead_code)]
     pub fn default_test() -> Self {
         Self {
             satiation: 1.0,

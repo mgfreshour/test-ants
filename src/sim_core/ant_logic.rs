@@ -102,6 +102,7 @@ pub fn recruit_entry_decision(
 
 /// After combat ends, decide whether an ant should return to Attacking
 /// (attack pheromone still present) or fall back to Foraging.
+#[allow(dead_code)]
 pub fn post_combat_state(attack_recruit_intensity: f32, signal_threshold: f32) -> &'static str {
     if attack_recruit_intensity >= signal_threshold {
         "attacking"

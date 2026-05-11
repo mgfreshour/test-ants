@@ -14,10 +14,12 @@ pub struct PheromoneConfig {
 }
 
 impl PheromoneConfig {
+    #[allow(dead_code)]
     pub fn evaporation_rate(&self, ptype: PheromoneType) -> f32 {
         self.evaporation_rates[ptype.index()]
     }
 
+    #[allow(dead_code)]
     pub fn diffusion_rate(&self, ptype: PheromoneType) -> f32 {
         self.diffusion_rates[ptype.index()]
     }
@@ -220,6 +222,7 @@ impl PheromoneGrid {
     }
 
     /// Total pheromone at a cell across all types (for overlay intensity)
+    #[allow(dead_code)]
     pub fn total_intensity(&self, x: usize, y: usize) -> f32 {
         if x < self.width && y < self.height {
             let idx = self.index(x, y);

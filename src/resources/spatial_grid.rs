@@ -18,6 +18,7 @@ impl SpatialGrid {
         self.cells.entry(key).or_default().push(entity);
     }
 
+    #[allow(dead_code)]
     pub fn query_radius(&self, position: Vec2, radius: f32) -> Vec<Entity> {
         let mut results = Vec::new();
         let cells_to_check = (radius / CELL_SIZE).ceil() as i32 + 1;

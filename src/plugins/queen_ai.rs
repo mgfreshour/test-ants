@@ -59,7 +59,7 @@ fn queen_utility_scoring(
     brood_query: Query<&Brood>,
     food_query: Query<&ColonyFood, With<MapMarker>>,
 ) {
-    for (hunger, health, map_id, colony, mut task) in &mut queen_query {
+    for (hunger, health, map_id, _colony, mut task) in &mut queen_query {
         let QueenTask::Idle { timer } = *task else { continue };
         if timer < REEVALUATE_INTERVAL {
             continue;

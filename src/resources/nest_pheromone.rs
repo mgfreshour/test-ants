@@ -346,6 +346,7 @@ impl NestPheromoneGrid {
     }
 
     /// Get the strongest chamber label direction from a position (for navigation).
+    #[allow(dead_code)]
     pub fn sense_chamber_label(
         &self,
         x: usize,

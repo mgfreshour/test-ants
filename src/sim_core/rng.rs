@@ -1,11 +1,13 @@
 use rand::rngs::{StdRng, ThreadRng};
 use rand::{Rng, SeedableRng};
 
+#[allow(dead_code)]
 pub trait SimRng {
     fn unit_f32(&mut self) -> f32;
     fn range_f32(&mut self, min: f32, max: f32) -> f32;
 }
 
+#[allow(dead_code)]
 pub struct ThreadSimRng {
     inner: ThreadRng,
 }
@@ -28,10 +30,12 @@ impl SimRng for ThreadSimRng {
     }
 }
 
+#[allow(dead_code)]
 pub struct SeededSimRng {
     inner: StdRng,
 }
 
+#[allow(dead_code)]
 impl SeededSimRng {
     pub fn from_seed(seed: u64) -> Self {
         Self {

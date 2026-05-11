@@ -271,7 +271,7 @@ fn load_nest_tiles(
 fn load_nest_entities(
     commands: &mut Commands,
     map: &tiled::Map,
-    map_height_px: f32,
+    _map_height_px: f32,
     nest_map_entity: Entity,
     map_kind_query: &Query<&MapKind, With<MapMarker>>,
     portals: &mut Vec<PortalData>,

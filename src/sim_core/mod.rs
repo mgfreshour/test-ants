@@ -21,6 +21,7 @@ pub mod test_fixtures;
 /// Scale frame delta seconds by a simulation speed multiplier.
 ///
 /// This helper is intentionally pure and side-effect free.
+#[allow(dead_code)]
 pub fn scaled_dt(delta_secs: f32, speed_multiplier: f32) -> f32 {
     delta_secs * speed_multiplier
 }

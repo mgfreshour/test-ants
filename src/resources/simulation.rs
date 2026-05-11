@@ -20,6 +20,7 @@ impl SimSpeed {
         }
     }
 
+    #[allow(dead_code)]
     pub fn label(&self) -> &'static str {
         match self {
             SimSpeed::Paused => "Paused",
@@ -63,8 +64,10 @@ pub struct SimConfig {
     pub world_width: f32,
     pub world_height: f32,
     pub tile_size: f32,
+    #[allow(dead_code)]
     pub initial_ant_count: u32,
     pub ant_speed_worker: f32,
+    #[allow(dead_code)]
     pub ant_speed_soldier: f32,
     pub exploration_noise: f32,
     pub nest_position: bevy::math::Vec2,

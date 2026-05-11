@@ -34,7 +34,7 @@ pub fn ant_return_steering(
     let mut rng = rand::thread_rng();
     let noise = config.exploration_noise * 0.5;
 
-    for (transform, mut movement, ant, colony, map_id, history, mut sense, mut steering_target, mut steering_weights) in &mut query {
+    for (transform, movement, ant, colony, map_id, history, mut sense, mut steering_target, mut steering_weights) in &mut query {
         if ant.state != AntState::Returning {
             continue;
         }

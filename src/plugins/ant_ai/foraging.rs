@@ -20,6 +20,7 @@ const TRAIL_FOLLOW_CHANCE: u32 = 60;
 const TRAIL_EPOCH_RATE: f32 = 0.33;
 const MIN_SENSE_INTENSITY: f32 = 1.5;
 const RECRUIT_SENSE_THRESHOLD: f32 = 0.8;
+#[allow(dead_code)]
 const RECRUIT_GRADIENT_WEIGHT: f32 = 2.0;
 
 const NOISE_SCALE_FRESH: f32 = 3.0;
@@ -51,7 +52,7 @@ pub fn ant_forage_steering(
     let mut rng = rand::thread_rng();
     let noise = config.exploration_noise;
 
-    for (entity, transform, mut movement, mut ant, job, colony, history, map_id, mut sense, mut steering_target, mut steering_weights) in &mut query {
+    for (entity, transform, movement, mut ant, job, colony, history, map_id, mut sense, mut steering_target, mut steering_weights) in &mut query {
         // Only surface ants use foraging AI
         if map_id.0 != registry.surface {
             continue;

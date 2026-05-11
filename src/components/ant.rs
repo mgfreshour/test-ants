@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub enum Caste {
     Worker,
     Soldier,
@@ -9,6 +10,7 @@ pub enum Caste {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub enum AntState {
     Idle,
     Foraging,
@@ -32,6 +34,7 @@ pub enum AntJob {
     Unassigned,
 }
 
+#[allow(dead_code)]
 impl AntJob {
     /// Returns true if this job works underground (in nest).
     pub fn is_underground_job(self) -> bool {
@@ -289,6 +292,7 @@ pub struct CarriedItem {
 pub struct PlayerControlled;
 
 #[derive(Component)]
+#[allow(dead_code)]
 pub struct Follower;
 
 /// Marker component for ants currently in the nest (underground).
@@ -320,6 +324,7 @@ impl Ant {
         }
     }
 
+    #[allow(dead_code)]
     pub fn new_soldier() -> Self {
         Self {
             caste: Caste::Soldier,

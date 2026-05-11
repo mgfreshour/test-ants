@@ -30,7 +30,7 @@ pub fn ant_defender_patrol(
 
     let mut rng = rand::thread_rng();
 
-    for (transform, mut movement, ant, job, colony, mut sense, mut steering_target, mut steering_weights) in &mut query {
+    for (transform, movement, ant, job, colony, mut sense, mut steering_target, mut steering_weights) in &mut query {
         if *job != AntJob::Defender {
             continue;
         }
