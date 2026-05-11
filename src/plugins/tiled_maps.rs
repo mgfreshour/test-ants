@@ -247,8 +247,9 @@ fn load_nest_tiles(
             if let Some(tile) = layer.get_tile(x as i32, y as i32) {
                 let value = tile.id() as i32 + 1;
                 if value > 0 {
-                    // NestGrid y=0 is top, Tiled row 0 is top — no flip needed
-                    tiles.push((x as i32, y as i32, value));
+                    // from_intgrid expects LDtk coords (y=0 at bottom), so flip Tiled's top-down Y
+                    let ldtk_y = (height - 1 - y) as i32;
+                    tiles.push((x as i32, ldtk_y, value));
                 }
             }
         }
