@@ -1,0 +1,8 @@
+{
+	"maps": [
+		{ "fileName": "0001_Surface.tmx", "x": 0, "y": 0 },
+		{ "fileName": "0002_PlayerNest.tmx", "x": 0, "y": 2200 },
+		{ "fileName": "0003_RedNest.tmx", "x": 0, "y": 2900 }
+	],
+	"type": "world"
+}

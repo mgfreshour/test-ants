@@ -390,12 +390,18 @@ fn ant_wall_collision(
             if let Some(safe_pos) = best {
                 transform.translation.x = safe_pos.x;
                 transform.translation.y = safe_pos.y;
-                // Reverse direction component pointing into the wall
                 let wall_normal = (safe_pos - pos).normalize_or_zero();
                 if wall_normal != Vec2::ZERO {
                     let dot = movement.direction.dot(wall_normal);
                     if dot < 0.0 {
-                        movement.direction = (movement.direction - wall_normal * dot * 2.0).normalize_or_zero();
+                        // Slide along the wall: remove the into-wall component
+                        let slide = movement.direction - wall_normal * dot;
+                        movement.direction = if slide.length_squared() > 0.01 {
+                            slide.normalize()
+                        } else {
+                            // Head-on: deflect perpendicular
+                            Vec2::new(-wall_normal.y, wall_normal.x)
+                        };
                     }
                 }
             }

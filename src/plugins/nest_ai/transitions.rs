@@ -1,6 +1,5 @@
 use bevy::prelude::*;
-use bevy_ecs_ldtk::prelude::GridCoords;
-use bevy_ecs_tilemap::tiles::{TileColor, TileTextureIndex};
+use bevy_ecs_tilemap::tiles::{TileColor, TileTextureIndex, TilePos};
 use rand::Rng;
 
 use crate::components::ant::{Ant, AntJob, AntState, ColonyMember, DamageSource, Health, Movement, PlayerControlled, PortalCooldown, PositionHistory, StimulusThresholds, Underground};
@@ -115,7 +114,7 @@ pub(super) fn apply_deferred_zone_expansions(
     mut commands: Commands,
     mut map_query: Query<(&mut NestGrid, &mut NestPathCache, &mut NestPheromoneGrid), With<MapMarker>>,
     query: Query<(Entity, &ExpandZoneDeferred)>,
-    mut tile_query: Query<(&GridCoords, &mut TileColor, &mut TileTextureIndex, &MapId)>,
+    mut tile_query: Query<(&TilePos, &mut TileColor, &mut TileTextureIndex, &MapId)>,
 ) {
     use crate::resources::nest_pheromone::chamber_kind_to_label;
 
@@ -138,7 +137,7 @@ pub(super) fn apply_deferred_zone_expansions(
                 phero.chamber_labels[label_idx] = 1.0;
             }
 
-            let target_gc = GridCoords::new(x as i32, (NEST_HEIGHT - 1 - y) as i32);
+            let target_gc = TilePos::new(x as u32, (NEST_HEIGHT - 1 - y) as u32);
             for (coords, mut color, mut tex_idx, tile_map_id) in &mut tile_query {
                 if tile_map_id.0 == expand.map && *coords == target_gc {
                     color.0 = new_cell.color();

@@ -13,6 +13,7 @@ use crate::plugins::camera::MainCamera;
 use crate::plugins::nest_navigation::{nest_grid_to_world, world_to_nest_grid};
 use crate::resources::active_map::{ActiveMap, MapRegistry, SavedCamera, SavedCameraStates};
 use crate::resources::nest::NestGrid;
+use crate::resources::surface_grid::SurfaceGrid;
 use crate::resources::nest_pathfinding::NestPathCache;
 use crate::resources::nest_pheromone::{NestPheromoneConfig, NestPheromoneGrid};
 use crate::resources::pheromone::{ColonyPheromones, PheromoneConfig};
@@ -481,6 +482,7 @@ fn player_movement(
     input: Res<ButtonInput<KeyCode>>,
     mode: Res<PlayerMode>,
     registry: Res<MapRegistry>,
+    surface_grid: Res<SurfaceGrid>,
     nest_query: Query<&NestGrid, With<MapMarker>>,
     mut commands: Commands,
     mut query: Query<
@@ -544,10 +546,21 @@ fn player_movement(
                 }
             }
         } else {
-            // Surface keyboard movement (unchanged)
             let speed = movement.speed * clock.speed.multiplier() * time.delta_secs();
-            transform.translation.x += dir.x * speed;
-            transform.translation.y += dir.y * speed;
+            let cur = transform.translation.truncate();
+            let new_pos = cur + dir * speed;
+            if !surface_grid.is_blocked_world(new_pos) {
+                transform.translation.x = new_pos.x;
+                transform.translation.y = new_pos.y;
+            } else {
+                let try_x = Vec2::new(new_pos.x, cur.y);
+                let try_y = Vec2::new(cur.x, new_pos.y);
+                if !surface_grid.is_blocked_world(try_x) {
+                    transform.translation.x = try_x.x;
+                } else if !surface_grid.is_blocked_world(try_y) {
+                    transform.translation.y = try_y.y;
+                }
+            }
         }
 
         if ant.state != AntState::Returning {
@@ -627,24 +640,31 @@ fn player_movement(
             let dist = to_target.length();
 
             if dist < 3.0 {
-                // Reached target
-                transform.translation.x = click.target.x;
-                transform.translation.y = click.target.y;
+                if !surface_grid.is_blocked_world(click.target) {
+                    transform.translation.x = click.target.x;
+                    transform.translation.y = click.target.y;
+                }
                 commands.entity(player_entity).remove::<ClickMoveTarget>();
             } else {
-                // Move toward target
                 let move_dir = to_target.normalize();
                 let step = move_dir * movement.speed * dt;
                 movement.direction = move_dir;
                 transform.rotation = Quat::from_rotation_z(move_dir.y.atan2(move_dir.x));
 
-                if step.length() > dist {
-                    transform.translation.x = click.target.x;
-                    transform.translation.y = click.target.y;
+                let new_pos = if step.length() > dist {
+                    click.target
+                } else {
+                    player_pos + step
+                };
+
+                if surface_grid.is_blocked_world(new_pos) {
                     commands.entity(player_entity).remove::<ClickMoveTarget>();
                 } else {
-                    transform.translation.x += step.x;
-                    transform.translation.y += step.y;
+                    transform.translation.x = new_pos.x;
+                    transform.translation.y = new_pos.y;
+                    if step.length() > dist {
+                        commands.entity(player_entity).remove::<ClickMoveTarget>();
+                    }
                 }
             }
         }

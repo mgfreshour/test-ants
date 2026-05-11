@@ -1,9 +1,9 @@
 use bevy::math::Vec2;
 use crate::resources::surface_grid::SurfaceGrid;
 
-pub const WALL_AVOID_WEIGHT: f32 = 1.5;
-pub const WHISKER_LENGTH: f32 = 32.0;
-pub const WHISKER_SPREAD: f32 = 0.4;
+pub const WALL_AVOID_WEIGHT: f32 = 2.5;
+pub const WHISKER_LENGTH: f32 = 48.0;
+pub const WHISKER_SPREAD: f32 = 0.5;
 
 pub fn compute_wall_avoidance(
     pos: Vec2,

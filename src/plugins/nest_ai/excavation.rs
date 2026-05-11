@@ -1,6 +1,5 @@
 use bevy::prelude::*;
-use bevy_ecs_ldtk::prelude::GridCoords;
-use bevy_ecs_tilemap::tiles::{TileColor, TileTextureIndex};
+use bevy_ecs_tilemap::tiles::{TileColor, TileTextureIndex, TilePos};
 
 use crate::components::map::{MapId, MapKind, MapMarker};
 use crate::components::nest::{Brood, CarriedBy, CellType, DigStep, FoodEntity, NestTask, Queen, QueenTask};
@@ -13,10 +12,10 @@ use crate::resources::simulation::{SimClock, SimSpeed};
 
 use super::{ExcavatedCell, ExpandZone, NestTaskLabel};
 
-/// Convert nest grid coordinates to GridCoords (bevy_ecs_tilemap convention).
-/// NestGrid y=0 is top; GridCoords y=0 is bottom.
-fn nest_to_grid_coords(gx: usize, gy: usize) -> GridCoords {
-    GridCoords::new(gx as i32, (NEST_HEIGHT - 1 - gy) as i32)
+/// Convert nest grid coordinates to TilePos (bevy_ecs_tilemap convention).
+/// NestGrid y=0 is top; TilePos y=0 is bottom.
+fn nest_to_tile_pos(gx: usize, gy: usize) -> TilePos {
+    TilePos::new(gx as u32, (NEST_HEIGHT - 1 - gy) as u32)
 }
 
 /// Update carried item positions to follow the ant carrying them.
@@ -50,7 +49,7 @@ pub(super) fn apply_zone_expansions(
     mut commands: Commands,
     mut map_query: Query<(&mut NestGrid, &mut NestPathCache, &mut NestPheromoneGrid), With<MapMarker>>,
     mut query: Query<(Entity, &ExpandZone, &MapId)>,
-    mut tile_query: Query<(&GridCoords, &mut TileColor, &mut TileTextureIndex, &MapId), Without<ExpandZone>>,
+    mut tile_query: Query<(&TilePos, &mut TileColor, &mut TileTextureIndex, &MapId), Without<ExpandZone>>,
 ) {
     use crate::resources::nest_pheromone::chamber_kind_to_label;
 
@@ -73,7 +72,7 @@ pub(super) fn apply_zone_expansions(
                 phero.chamber_labels[label_idx] = 1.0;
             }
 
-            let target_gc = nest_to_grid_coords(x, y);
+            let target_gc = nest_to_tile_pos(x, y);
             for (coords, mut color, mut tex_idx, tile_map_id) in &mut tile_query {
                 if tile_map_id.0 == map_id.0 && *coords == target_gc {
                     color.0 = new_cell.color();
@@ -92,7 +91,7 @@ pub(super) fn apply_excavated_cells(
     mut commands: Commands,
     mut map_query: Query<(&mut NestGrid, &mut NestPathCache), With<MapMarker>>,
     mut query: Query<(Entity, &ExcavatedCell, &MapId)>,
-    mut tile_query: Query<(&GridCoords, &mut TileColor, &mut TileTextureIndex, &MapId), Without<ExcavatedCell>>,
+    mut tile_query: Query<(&TilePos, &mut TileColor, &mut TileTextureIndex, &MapId), Without<ExcavatedCell>>,
 ) {
     for (entity, excavated, map_id) in &mut query {
         let Ok((mut grid, mut path_cache)) = map_query.get_mut(map_id.0) else {
@@ -105,7 +104,7 @@ pub(super) fn apply_excavated_cells(
             grid.set(x, y, CellType::Tunnel);
             path_cache.invalidate();
 
-            let target_gc = nest_to_grid_coords(x, y);
+            let target_gc = nest_to_tile_pos(x, y);
             for (coords, mut color, mut tex_idx, tile_map_id) in &mut tile_query {
                 if tile_map_id.0 == map_id.0 && *coords == target_gc {
                     color.0 = CellType::Tunnel.color();
@@ -243,7 +242,7 @@ pub(super) fn player_dig_zone_input(
     camera_query: Query<(&Camera, &GlobalTransform), With<crate::plugins::camera::MainCamera>>,
     active: Res<ActiveMap>,
     mut map_query: Query<(&NestGrid, &mut PlayerDigZones), With<MapMarker>>,
-    mut tile_query: Query<(&GridCoords, &mut TileColor, &MapId)>,
+    mut tile_query: Query<(&TilePos, &mut TileColor, &MapId)>,
 ) {
     // Only process when viewing a nest.
     if !matches!(active.kind, MapKind::Nest { .. }) {
@@ -265,7 +264,7 @@ pub(super) fn player_dig_zone_input(
 
     let Ok((grid, mut dig_zones)) = map_query.get_mut(active.entity) else { return };
 
-    let target_gc = nest_to_grid_coords(gx, gy);
+    let target_gc = nest_to_tile_pos(gx, gy);
 
     if left {
         // Only allow marking diggable cells.
