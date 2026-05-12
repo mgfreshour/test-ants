@@ -13,6 +13,27 @@ use crate::resources::nest_pheromone::NestPheromoneGrid;
 use crate::resources::simulation::SimConfig;
 use crate::resources::surface_grid::SurfaceGrid;
 
+#[cfg(target_arch = "wasm32")]
+static SURFACE_TMX: &[u8] = include_bytes!("../../assets/maps/colony/tiled/0001_Surface.tmx");
+#[cfg(target_arch = "wasm32")]
+static PLAYER_NEST_TMX: &[u8] = include_bytes!("../../assets/maps/colony/tiled/0002_PlayerNest.tmx");
+#[cfg(target_arch = "wasm32")]
+static RED_NEST_TMX: &[u8] = include_bytes!("../../assets/maps/colony/tiled/0003_RedNest.tmx");
+
+#[cfg(target_arch = "wasm32")]
+fn wasm_reader(path: &std::path::Path) -> std::io::Result<std::io::Cursor<&'static [u8]>> {
+    let s = path.to_string_lossy();
+    if s.contains("0001_Surface") {
+        Ok(std::io::Cursor::new(SURFACE_TMX))
+    } else if s.contains("0002_PlayerNest") {
+        Ok(std::io::Cursor::new(PLAYER_NEST_TMX))
+    } else if s.contains("0003_RedNest") {
+        Ok(std::io::Cursor::new(RED_NEST_TMX))
+    } else {
+        Err(std::io::ErrorKind::NotFound.into())
+    }
+}
+
 pub struct TiledMapsPlugin;
 
 impl Plugin for TiledMapsPlugin {
@@ -44,7 +65,10 @@ fn load_maps(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
+    #[cfg(not(target_arch = "wasm32"))]
     let mut loader = tiled::Loader::new();
+    #[cfg(target_arch = "wasm32")]
+    let mut loader = tiled::Loader::with_reader(wasm_reader);
     let mut all_portals: Vec<PortalData> = Vec::new();
 
     // --- Surface ---
